@@ -7,6 +7,7 @@
 /dts-v1/;
 
 #include "sun20i-d1.dtsi"
+#include <dt-bindings/clock/sun6i-rtc.h>
 #include "sun20i-common-regulators.dtsi"
 
 / {
@@ -144,6 +145,11 @@
 
 &tcon_lcd0 {
 	status = "disabled";
+};
+
+&rtc {
+	assigned-clocks = <&rtc CLK_RTC_32K>;
+	assigned-clock-parents = <&rtc CLK_OSC24M_32K>;
 };
 
 &uart0 {
