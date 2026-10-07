@@ -6,6 +6,8 @@
 #define CLK_OSC32K		0
 #define CLK_OSC32K_FANOUT	1
 #define CLK_IOSC		2
+#define CLK_OSC24M_32K		5
+#define CLK_RTC_32K		6
 #define CLK_HOSC_UFS		8
 #define CLK_HOSC_HDMI		9
 #define CLK_HOSC_SERDES0	10
