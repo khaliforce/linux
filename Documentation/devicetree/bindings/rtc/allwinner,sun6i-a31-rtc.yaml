@@ -57,11 +57,14 @@ properties:
     minItems: 1
     maxItems: 3
     description:
-      The RTC provides up to three clocks
+      Legacy RTC variants provide up to three clocks
         - the Low Frequency Oscillator or LOSC, at index 0,
         - the Low Frequency Oscillator External output (X32KFOUT in
           the datasheet), at index 1,
         - the Internal Oscillator, at index 2.
+
+      CCU-backed variants also provide the divided high-frequency oscillator
+      at index 5 and the RTC source mux at index 6.
 
 allOf:
   - $ref: rtc.yaml#
