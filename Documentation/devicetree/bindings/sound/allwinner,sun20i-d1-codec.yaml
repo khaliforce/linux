@@ -1,0 +1,90 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/sound/allwinner,sun20i-d1-codec.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Allwinner D1 Internal Audio Codec
+
+maintainers:
+  - Samuel Holland <samuel@sholland.org>
+
+allOf:
+  - $ref: sound-card-common.yaml#
+
+properties:
+  compatible:
+    items:
+      - const: allwinner,sun20i-d1-codec
+      - const: simple-mfd
+      - const: syscon
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    maxItems: 1
+
+  clocks:
+    items:
+      - description: Bus clock
+      - description: ADC clock
+      - description: DAC clock
+
+  clock-names:
+    items:
+      - const: bus
+      - const: adc
+      - const: dac
+
+  resets:
+    maxItems: 1
+
+  dmas:
+    items:
+      - description: ADC receive channel
+      - description: DAC transmit channel
+
+  dma-names:
+    items:
+      - const: rx
+      - const: tx
+
+  "#address-cells":
+    const: 1
+
+  "#size-cells":
+    const: 1
+
+  "#sound-dai-cells":
+    const: 0
+
+  ranges:
+    maxItems: 1
+
+  avcc-supply: true
+  hpvcc-supply: true
+  vdd33-supply: true
+
+  audio-widgets:
+    $ref: /schemas/types.yaml#/definitions/non-unique-string-array
+    description:
+      A list of widget type and name pairs.
+      Types include Headphone, Line, Microphone, and Speaker.
+
+  regulators@348:
+    $ref: /schemas/regulator/allwinner,sun20i-d1-analog-ldos.yaml#
+
+required:
+  - compatible
+  - reg
+  - interrupts
+  - clocks
+  - clock-names
+  - resets
+  - dmas
+  - dma-names
+  - "#sound-dai-cells"
+
+unevaluatedProperties: false
+...
