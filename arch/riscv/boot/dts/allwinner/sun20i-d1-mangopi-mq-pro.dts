@@ -62,6 +62,17 @@
 	};
 };
 
+&codec {
+	model = "MangoPi MQ Pro Analog";
+	avcc-supply = <&reg_codec_aldo>;
+	hpvcc-supply = <&reg_codec_hpldo>;
+	vdd33-supply = <&reg_vcc_3v3>;
+	audio-routing = "Audio Out", "HPOUTL",
+		  "Audio Out", "HPOUTR";
+	audio-widgets = "Headphone", "Audio Out";
+	status = "okay";
+};
+
 &cpu0 {
 	cpu-supply = <&reg_vdd_cpu>;
 };
@@ -139,4 +150,16 @@
 &usbphy {
 	usb1_vbus-supply = <&reg_vcc>;
 	status = "okay";
+};
+
+&reg_codec_aldo {
+	regulator-min-microvolt = <1800000>;
+	regulator-max-microvolt = <1800000>;
+	vdd33-supply = <&reg_vcc_3v3>;
+};
+
+&reg_codec_hpldo {
+	regulator-min-microvolt = <1800000>;
+	regulator-max-microvolt = <1800000>;
+	hpldoin-supply = <&reg_vcc_3v3>;
 };
