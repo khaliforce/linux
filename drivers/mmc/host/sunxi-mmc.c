@@ -244,6 +244,7 @@ struct sunxi_idma_des {
 
 struct sunxi_mmc_cfg {
 	u32 idma_des_size_bits;
+	u32 idma_max_seg_size;
 	u32 idma_des_shift;
 	const struct sunxi_mmc_clk_delay *clk_delays;
 
@@ -1169,6 +1170,7 @@ static const struct sunxi_mmc_cfg sun9i_a80_cfg = {
 
 static const struct sunxi_mmc_cfg sun20i_d1_cfg = {
 	.idma_des_size_bits = 13,
+	.idma_max_seg_size = (1 << 13) - 4,
 	.idma_des_shift = 2,
 	.can_calibrate = true,
 	.mask_data0 = true,
@@ -1198,6 +1200,14 @@ static const struct sunxi_mmc_cfg sun50i_h616_cfg = {
 	.needs_new_timings = true,
 };
 
+static const struct sunxi_mmc_cfg sun50i_a100_cfg = {
+	.idma_des_size_bits = 13,
+	.idma_des_shift = 2,
+	.can_calibrate = true,
+	.mask_data0 = true,
+	.needs_new_timings = true,
+};
+
 static const struct sunxi_mmc_cfg sun50i_a100_emmc_cfg = {
 	.idma_des_size_bits = 13,
 	.idma_des_shift = 2,
@@ -1215,7 +1225,7 @@ static const struct of_device_id sunxi_mmc_of_match[] = {
 	{ .compatible = "allwinner,sun20i-d1-mmc", .data = &sun20i_d1_cfg },
 	{ .compatible = "allwinner,sun50i-a64-mmc", .data = &sun50i_a64_cfg },
 	{ .compatible = "allwinner,sun50i-a64-emmc", .data = &sun50i_a64_emmc_cfg },
-	{ .compatible = "allwinner,sun50i-a100-mmc", .data = &sun20i_d1_cfg },
+	{ .compatible = "allwinner,sun50i-a100-mmc", .data = &sun50i_a100_cfg },
 	{ .compatible = "allwinner,sun50i-a100-emmc", .data = &sun50i_a100_emmc_cfg },
 	{ .compatible = "allwinner,sun50i-h616-mmc", .data = &sun50i_h616_cfg },
 	{ /* sentinel */ }
@@ -1417,7 +1427,8 @@ static int sunxi_mmc_probe(struct platform_device *pdev)
 	mmc->max_blk_count	= 8192;
 	mmc->max_blk_size	= 4096;
 	mmc->max_segs		= PAGE_SIZE / sizeof(struct sunxi_idma_des);
-	mmc->max_seg_size	= (1 << host->cfg->idma_des_size_bits);
+	mmc->max_seg_size	= host->cfg->idma_max_seg_size ?:
+				  (1 << host->cfg->idma_des_size_bits);
 	mmc->max_req_size	= mmc->max_seg_size * mmc->max_segs;
 	/* 400kHz ~ 52MHz */
 	mmc->f_min		=   400000;
