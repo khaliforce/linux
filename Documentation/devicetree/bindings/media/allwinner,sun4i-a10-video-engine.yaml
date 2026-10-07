@@ -80,7 +80,19 @@ required:
   - clocks
   - clock-names
   - resets
-  - allwinner,sram
+
+allOf:
+  - if:
+      properties:
+        compatible:
+          contains:
+            const: allwinner,sun20i-d1-video-engine
+    then:
+      properties:
+        allwinner,sram: false
+    else:
+      required:
+        - allwinner,sram
 
 additionalProperties: false
 
