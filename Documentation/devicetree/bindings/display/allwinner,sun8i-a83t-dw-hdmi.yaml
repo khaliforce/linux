@@ -25,6 +25,7 @@ properties:
 
   compatible:
     oneOf:
+      - const: allwinner,sun20i-d1-dw-hdmi
       - const: allwinner,sun8i-a83t-dw-hdmi
       - const: allwinner,sun50i-h6-dw-hdmi
 
@@ -46,23 +47,11 @@ properties:
 
   clocks:
     minItems: 3
-    items:
-      - description: Bus Clock
-      - description: Register Clock
-      - description: TMDS Clock
-      - description: HDMI CEC Clock
-      - description: HDCP Clock
-      - description: HDCP Bus Clock
+    maxItems: 6
 
   clock-names:
     minItems: 3
-    items:
-      - const: iahb
-      - const: isfr
-      - const: tmds
-      - const: cec
-      - const: hdcp
-      - const: hdcp-bus
+    maxItems: 6
 
   resets:
     minItems: 1
@@ -125,22 +114,69 @@ if:
   properties:
     compatible:
       contains:
-        enum:
-          - allwinner,sun50i-h6-dw-hdmi
+        const: allwinner,sun20i-d1-dw-hdmi
 
 then:
   properties:
     clocks:
-      minItems: 6
+      items:
+        - description: Bus Clock
+        - description: Register Clock
+        - description: HDMI CEC Clock
 
     clock-names:
-      minItems: 6
+      items:
+        - const: iahb
+        - const: isfr
+        - const: cec
 
     resets:
-      minItems: 2
+      maxItems: 1
 
     reset-names:
-      minItems: 2
+      maxItems: 1
+
+else:
+  properties:
+    clocks:
+      minItems: 3
+      items:
+        - description: Bus Clock
+        - description: Register Clock
+        - description: TMDS Clock
+        - description: HDMI CEC Clock
+        - description: HDCP Clock
+        - description: HDCP Bus Clock
+
+    clock-names:
+      minItems: 3
+      items:
+        - const: iahb
+        - const: isfr
+        - const: tmds
+        - const: cec
+        - const: hdcp
+        - const: hdcp-bus
+
+  if:
+    properties:
+      compatible:
+        contains:
+          const: allwinner,sun50i-h6-dw-hdmi
+
+  then:
+    properties:
+      clocks:
+        minItems: 6
+
+      clock-names:
+        minItems: 6
+
+      resets:
+        minItems: 2
+
+      reset-names:
+        minItems: 2
 
 additionalProperties: false
 
