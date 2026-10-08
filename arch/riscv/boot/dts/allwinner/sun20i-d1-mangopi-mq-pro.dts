@@ -154,6 +154,10 @@
 	vcc-pe-supply = <&reg_avdd2v8>;
 };
 
+&ths {
+	vref-supply = <&reg_codec_aldo>;
+};
+
 &tcon_lcd0 {
 	status = "disabled";
 };
