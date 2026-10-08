@@ -19,6 +19,7 @@
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
+#include <linux/regulator/consumer.h>
 #include <linux/reset.h>
 #include <linux/slab.h>
 #include <linux/thermal.h>
@@ -68,6 +69,7 @@ struct tsensor {
 struct ths_thermal_chip {
 	bool            has_mod_clk;
 	bool            has_bus_clk_reset;
+	bool		has_vref;
 	bool		needs_sram;
 	int		sensor_num;
 	int		offset;
@@ -387,6 +389,12 @@ static int sun8i_ths_resource_init(struct ths_device *tmdev)
 	if (IS_ERR(tmdev->regmap))
 		return PTR_ERR(tmdev->regmap);
 
+	if (tmdev->chip->has_vref) {
+		ret = devm_regulator_get_enable_optional(dev, "vref");
+		if (ret && ret != -ENODEV)
+			return dev_err_probe(dev, ret, "Failed to enable vref supply\n");
+	}
+
 	if (tmdev->chip->has_bus_clk_reset) {
 		tmdev->reset = devm_reset_control_get(dev, NULL);
 		if (IS_ERR(tmdev->reset))
@@ -683,6 +691,7 @@ static const struct ths_thermal_chip sun50i_h6_ths = {
 };
 
 static const struct ths_thermal_chip sun20i_d1_ths = {
+	.has_vref = true,
 	.sensor_num = 1,
 	.has_bus_clk_reset = true,
 	.offset = 188552,
