@@ -53,6 +53,9 @@ properties:
   nvmem-cell-names:
     const: calibration
 
+  vref-supply:
+    description: Reference voltage supply for the D1 thermal sensor
+
   allwinner,sram:
     maxItems: 1
     description: phandle to device controlling temperate offset SYS_CFG register
@@ -63,6 +66,16 @@ properties:
       - 1
 
 allOf:
+  - if:
+      not:
+        properties:
+          compatible:
+            contains:
+              const: allwinner,sun20i-d1-ths
+    then:
+      properties:
+        vref-supply: false
+
   - if:
       properties:
         compatible:
