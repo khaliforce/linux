@@ -21,6 +21,14 @@ struct sunxi_engine;
  * implement the proper behaviour.
  */
 struct sunxi_engine_ops {
+	/** @atomic_enable: Optional engine enable before the timing controller starts. */
+	void (*atomic_enable)(struct sunxi_engine *engine);
+
+	/** @atomic_disable: Optional DMA stop before the timing controller stops. */
+	void (*atomic_disable)(struct sunxi_engine *engine,
+			       struct drm_crtc *crtc,
+			       struct drm_atomic_commit *state);
+
 	/**
 	 * @atomic_begin:
 	 *

@@ -113,6 +113,9 @@ static void sun4i_crtc_atomic_disable(struct drm_crtc *crtc,
 
 	DRM_DEBUG_DRIVER("Disabling the CRTC\n");
 
+	if (scrtc->engine->ops->atomic_disable)
+		scrtc->engine->ops->atomic_disable(scrtc->engine, crtc, state);
+
 	drm_crtc_vblank_off(crtc);
 
 	sun4i_tcon_set_status(scrtc->tcon, encoder, false);
@@ -133,6 +136,9 @@ static void sun4i_crtc_atomic_enable(struct drm_crtc *crtc,
 	struct sun4i_crtc *scrtc = drm_crtc_to_sun4i_crtc(crtc);
 
 	DRM_DEBUG_DRIVER("Enabling the CRTC\n");
+
+	if (scrtc->engine->ops->atomic_enable)
+		scrtc->engine->ops->atomic_enable(scrtc->engine);
 
 	sun4i_tcon_set_status(scrtc->tcon, encoder, true);
 
