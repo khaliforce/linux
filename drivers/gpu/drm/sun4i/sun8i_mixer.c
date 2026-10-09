@@ -23,6 +23,7 @@
 #include <drm/drm_gem_dma_helper.h>
 #include <drm/drm_print.h>
 #include <drm/drm_probe_helper.h>
+#include <drm/drm_vblank.h>
 
 #include "sun4i_drv.h"
 #include "sun8i_mixer.h"
@@ -412,7 +413,41 @@ static void sun8i_mixer_mode_set(struct sunxi_engine *engine,
 			 interlaced ? "on" : "off");
 }
 
+static void sun8i_mixer_atomic_enable(struct sunxi_engine *engine)
+{
+	struct sun8i_mixer *mixer = engine_to_sun8i_mixer(engine);
+
+	if (!mixer->cfg->stop_dma_on_modeset)
+		return;
+
+	regmap_update_bits(engine->regs, SUN8I_MIXER_GLOBAL_CTL,
+			   SUN8I_MIXER_GLOBAL_CTL_RT_EN,
+			   SUN8I_MIXER_GLOBAL_CTL_RT_EN);
+}
+
+static void sun8i_mixer_atomic_disable(struct sunxi_engine *engine,
+				       struct drm_crtc *crtc,
+				       struct drm_atomic_commit *state)
+{
+	struct sun8i_mixer *mixer = engine_to_sun8i_mixer(engine);
+	struct drm_crtc_state *old_state;
+
+	if (!mixer->cfg->stop_dma_on_modeset)
+		return;
+
+	old_state = drm_atomic_get_old_crtc_state(state, crtc);
+	drm_atomic_helper_disable_planes_on_crtc(old_state, false);
+	regmap_write(engine->regs, SUN8I_MIXER_GLOBAL_DBUFF,
+		     SUN8I_MIXER_GLOBAL_DBUFF_ENABLE);
+	if (old_state->active)
+		drm_crtc_wait_one_vblank(crtc);
+	regmap_update_bits(engine->regs, SUN8I_MIXER_GLOBAL_CTL,
+			   SUN8I_MIXER_GLOBAL_CTL_RT_EN, 0);
+}
+
 static const struct sunxi_engine_ops sun8i_engine_ops = {
+	.atomic_enable	= sun8i_mixer_atomic_enable,
+	.atomic_disable	= sun8i_mixer_atomic_disable,
 	.commit		= sun8i_mixer_commit,
 	.layers_init	= sun8i_layers_init,
 	.mode_set	= sun8i_mixer_mode_set,
@@ -794,6 +829,7 @@ static const struct sun8i_mixer_cfg sun8i_v3s_mixer_cfg = {
 };
 
 static const struct sun8i_mixer_cfg sun20i_d1_mixer0_cfg = {
+	.stop_dma_on_modeset = true,
 	.lay_cfg = {
 		.ccsc		= CCSC_D1_MIXER0_LAYOUT,
 		.de_type	= SUN8I_MIXER_DE2,
@@ -809,6 +845,7 @@ static const struct sun8i_mixer_cfg sun20i_d1_mixer0_cfg = {
 };
 
 static const struct sun8i_mixer_cfg sun20i_d1_mixer1_cfg = {
+	.stop_dma_on_modeset = true,
 	.lay_cfg = {
 		.ccsc		= CCSC_MIXER1_LAYOUT,
 		.de_type	= SUN8I_MIXER_DE2,
