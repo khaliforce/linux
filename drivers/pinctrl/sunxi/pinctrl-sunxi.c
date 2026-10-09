@@ -985,7 +985,7 @@ static int sunxi_pinctrl_gpio_get_direction(struct gpio_chip *chip,
 {
 	struct sunxi_pinctrl *pctl = gpiochip_get_data(chip);
 	const struct sunxi_desc_function *func;
-	u32 pin = offset + chip->base;
+	u32 pin = offset + pctl->desc->pin_base;
 	u32 reg, shift, mask;
 	u8 muxval;
 
@@ -1010,7 +1010,8 @@ static int sunxi_pinctrl_gpio_direction_input(struct gpio_chip *chip,
 	struct sunxi_pinctrl *pctl = gpiochip_get_data(chip);
 
 	return sunxi_pmx_gpio_set_direction(pctl->pctl_dev, NULL,
-					    chip->base + offset, true);
+					    pctl->desc->pin_base + offset,
+					    true);
 }
 
 static int sunxi_pinctrl_gpio_get(struct gpio_chip *chip, unsigned offset)
@@ -1018,7 +1019,7 @@ static int sunxi_pinctrl_gpio_get(struct gpio_chip *chip, unsigned offset)
 	struct sunxi_pinctrl *pctl = gpiochip_get_data(chip);
 	bool set_mux = pctl->desc->irq_read_needs_mux &&
 		gpiochip_line_is_irq(chip, offset);
-	u32 pin = offset + chip->base;
+	u32 pin = offset + pctl->desc->pin_base;
 	u32 reg, shift, mask, val;
 
 	sunxi_data_reg(pctl, offset, &reg, &shift, &mask);
@@ -1074,7 +1075,8 @@ static int sunxi_pinctrl_gpio_direction_output(struct gpio_chip *chip,
 
 	sunxi_pinctrl_gpio_set(chip, offset, value);
 	return sunxi_pmx_gpio_set_direction(pctl->pctl_dev, NULL,
-					    chip->base + offset, false);
+					    pctl->desc->pin_base + offset,
+					    false);
 }
 
 static int sunxi_pinctrl_gpio_of_xlate(struct gpio_chip *gc,
@@ -1742,7 +1744,10 @@ int sunxi_pinctrl_init_with_flags(struct platform_device *pdev,
 			    pctl->desc->pin_base;
 	pctl->chip->label = dev_name(&pdev->dev);
 	pctl->chip->parent = &pdev->dev;
-	pctl->chip->base = pctl->desc->pin_base;
+	if (of_machine_is_compatible("widora,mangopi-mq-pro"))
+		pctl->chip->base = -1;
+	else
+		pctl->chip->base = pctl->desc->pin_base;
 
 	ret = gpiochip_add_data(pctl->chip, pctl);
 	if (ret)
