@@ -96,6 +96,7 @@
 	status = "okay";
 
 	rtl8723ds: wifi@1 {
+		compatible = "realtek,rtl8723ds";
 		reg = <1>;
 		interrupt-parent = <&pio>;
 		interrupts = <6 10 IRQ_TYPE_LEVEL_LOW>; /* PG10 */
