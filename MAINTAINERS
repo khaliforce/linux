@@ -23041,6 +23041,7 @@ M:	Ping-Ke Shih <pkshih@realtek.com>
 L:	linux-wireless@vger.kernel.org
 S:	Maintained
 T:	git https://github.com/pkshih/rtw.git
+F:	Documentation/devicetree/bindings/net/wireless/realtek,rtl8723ds.yaml
 F:	drivers/net/wireless/realtek/rtw88/
 
 REALTEK WIRELESS DRIVER (rtw89)
