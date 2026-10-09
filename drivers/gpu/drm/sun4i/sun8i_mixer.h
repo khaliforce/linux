@@ -203,6 +203,7 @@ struct sun8i_mixer_cfg {
 	unsigned int		de_type;
 	unsigned long		mod_rate;
 	unsigned int		map[6];
+	bool stop_dma_on_modeset;
 };
 
 struct sun8i_mixer {
