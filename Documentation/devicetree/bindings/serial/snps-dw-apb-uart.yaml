@@ -114,6 +114,15 @@ properties:
       parameter. Define this if your UART does not implement the busy functionality.
     type: boolean
 
+  fifo-size:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    minimum: 16
+    description: FIFO size when the component parameter register is unavailable.
+
+  auto-flow-control:
+    type: boolean
+    description: The UART supports automatic RTS/CTS flow control.
+
   power-domains:
     maxItems: 1
 
