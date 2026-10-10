@@ -118,6 +118,8 @@
 };
 
 &uart1 {
+	auto-flow-control;
+	fifo-size = <256>;
 	uart-has-rtscts;
 	pinctrl-0 = <&uart1_pg6_pins>, <&uart1_pg8_rts_cts_pins>;
 	pinctrl-names = "default";
