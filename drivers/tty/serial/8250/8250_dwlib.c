@@ -50,6 +50,11 @@ static void dw8250_set_divisor(struct uart_port *p, unsigned int baud,
 void dw8250_do_set_termios(struct uart_port *p, struct ktermios *termios,
 			   const struct ktermios *old)
 {
+	struct uart_8250_port *up = up_to_u8250p(p);
+
+	if (p->dev && device_property_read_bool(p->dev, "auto-flow-control"))
+		up->capabilities |= UART_CAP_AFE;
+
 	p->status &= ~UPSTAT_AUTOCTS;
 	if (termios->c_cflag & CRTSCTS)
 		p->status |= UPSTAT_AUTOCTS;
@@ -235,8 +240,14 @@ void dw8250_setup_port(struct uart_port *p)
 		reg = pd->cpr_value;
 		dev_dbg(p->dev, "CPR is not available, using 0x%08x instead\n", reg);
 	}
-	if (!reg)
+	if (!reg) {
+		if (p->fifosize) {
+			p->type = PORT_16550A;
+			p->flags |= UPF_FIXED_TYPE;
+			up->capabilities |= UART_CAP_FIFO;
+		}
 		return;
+	}
 
 	/* Select the type based on FIFO */
 	if (reg & DW_UART_CPR_FIFO_MODE) {
