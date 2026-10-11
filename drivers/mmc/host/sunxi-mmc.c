@@ -269,6 +269,7 @@ struct sunxi_mmc_cfg {
 struct sunxi_mmc_host {
 	struct device *dev;
 	struct mmc_host	*mmc;
+	bool mq_rtl8723ds_ocr;
 	struct reset_control *reset;
 	const struct sunxi_mmc_cfg *cfg;
 
@@ -507,6 +508,14 @@ static void sunxi_mmc_dump_errinfo(struct sunxi_mmc_host *host)
 		);
 }
 
+static void sunxi_mmc_fixup_ocr(struct sunxi_mmc_host *host,
+				struct mmc_command *cmd)
+{
+	if (host->mq_rtl8723ds_ocr && cmd->opcode == SD_IO_SEND_OP_COND &&
+	    cmd->resp[0] == 0x90ffffff)
+		cmd->resp[0] &= ~0x7f;
+}
+
 /* Called in interrupt context! */
 static irqreturn_t sunxi_mmc_finalize_request(struct sunxi_mmc_host *host)
 {
@@ -536,6 +545,7 @@ static irqreturn_t sunxi_mmc_finalize_request(struct sunxi_mmc_host *host)
 			mrq->cmd->resp[3] = mmc_readl(host, REG_RESP0);
 		} else {
 			mrq->cmd->resp[0] = mmc_readl(host, REG_RESP0);
+			sunxi_mmc_fixup_ocr(host, mrq->cmd);
 		}
 
 		if (data)
@@ -1372,6 +1382,26 @@ error_disable_mmc:
 	return ret;
 }
 
+static bool sunxi_mmc_has_mq_ocr_quirk(struct mmc_host *mmc)
+{
+	struct device_node *np;
+	u32 reg;
+	bool match;
+
+	if (mmc_card_is_removable(mmc) ||
+	    !of_machine_is_compatible("widora,mangopi-mq-pro") ||
+	    !of_device_is_compatible(mmc_dev(mmc)->of_node,
+				     "allwinner,sun20i-d1-mmc"))
+		return false;
+
+	np = of_get_compatible_child(mmc_dev(mmc)->of_node, "realtek,rtl8723ds");
+	match = of_device_is_available(np) &&
+		!of_property_read_u32(np, "reg", &reg) && reg == 1;
+	of_node_put(np);
+
+	return match;
+}
+
 static int sunxi_mmc_probe(struct platform_device *pdev)
 {
 	struct sunxi_mmc_host *host;
@@ -1451,6 +1481,8 @@ static int sunxi_mmc_probe(struct platform_device *pdev)
 	ret = mmc_of_parse(mmc);
 	if (ret)
 		goto error_free_dma;
+
+	host->mq_rtl8723ds_ocr = sunxi_mmc_has_mq_ocr_quirk(mmc);
 
 	/*
 	 * If we don't support delay chains in the SoC, we can't use any
