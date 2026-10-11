@@ -66,12 +66,14 @@
 #define SUNXI_MUSB_FL_HAS_RESET			6
 #define SUNXI_MUSB_FL_NO_CONFIGDATA		7
 #define SUNXI_MUSB_FL_PHY_MODE_PEND		8
+#define SUNXI_MUSB_FL_NO_ULPI_BUSCONTROL	9
 
 struct sunxi_musb_cfg {
 	const struct musb_hdrc_config *hdrc_config;
 	bool has_sram;
 	bool has_reset;
 	bool no_configdata;
+	bool no_ulpi_buscontrol;
 };
 
 /* Our read/write methods need access and do not get passed in a musb ref :| */
@@ -446,8 +448,11 @@ static u8 sunxi_musb_readb(void __iomem *addr, u32 offset)
 
 			return readb(addr + SUNXI_MUSB_CONFIGDATA);
 		case MUSB_ULPI_BUSCONTROL:
-			dev_warn(sunxi_musb->controller->parent,
-				"sunxi-musb does not have ULPI bus control register\n");
+			glue = dev_get_drvdata(sunxi_musb->controller->parent);
+			if (!test_bit(SUNXI_MUSB_FL_NO_ULPI_BUSCONTROL,
+				      &glue->flags))
+				dev_warn(sunxi_musb->controller->parent,
+					 "sunxi-musb does not have ULPI bus control register\n");
 			return 0;
 		/* Offset for these is fixed by sunxi_musb_busctl_offset() */
 		case SUNXI_MUSB_TXFUNCADDR:
@@ -479,6 +484,8 @@ static u8 sunxi_musb_readb(void __iomem *addr, u32 offset)
 
 static void sunxi_musb_writeb(void __iomem *addr, unsigned offset, u8 data)
 {
+	struct sunxi_glue *glue;
+
 	if (addr == sunxi_musb->mregs) {
 		/* generic control or fifo control reg access */
 		switch (offset) {
@@ -504,8 +511,11 @@ static void sunxi_musb_writeb(void __iomem *addr, unsigned offset, u8 data)
 		case MUSB_RXFIFOSZ:
 			return writeb(data, addr + SUNXI_MUSB_RXFIFOSZ);
 		case MUSB_ULPI_BUSCONTROL:
-			dev_warn(sunxi_musb->controller->parent,
-				"sunxi-musb does not have ULPI bus control register\n");
+			glue = dev_get_drvdata(sunxi_musb->controller->parent);
+			if (!test_bit(SUNXI_MUSB_FL_NO_ULPI_BUSCONTROL,
+				      &glue->flags))
+				dev_warn(sunxi_musb->controller->parent,
+					 "sunxi-musb does not have ULPI bus control register\n");
 			return;
 		/* Offset for these is fixed by sunxi_musb_busctl_offset() */
 		case SUNXI_MUSB_TXFUNCADDR:
@@ -737,6 +747,9 @@ static int sunxi_musb_probe(struct platform_device *pdev)
 	if (cfg->no_configdata)
 		set_bit(SUNXI_MUSB_FL_NO_CONFIGDATA, &glue->flags);
 
+	if (cfg->no_ulpi_buscontrol)
+		set_bit(SUNXI_MUSB_FL_NO_ULPI_BUSCONTROL, &glue->flags);
+
 	glue->clk = devm_clk_get(&pdev->dev, NULL);
 	if (IS_ERR(glue->clk)) {
 		dev_err(&pdev->dev, "Error getting clock: %ld\n",
@@ -840,7 +853,16 @@ static const struct sunxi_musb_cfg suniv_f1c100s_musb_cfg = {
 	.no_configdata = true,
 };
 
+static const struct sunxi_musb_cfg sun20i_d1_musb_cfg = {
+	.hdrc_config = &sunxi_musb_hdrc_config_5eps,
+	.has_reset = true,
+	.no_configdata = true,
+	.no_ulpi_buscontrol = true,
+};
+
 static const struct of_device_id sunxi_musb_match[] = {
+	{ .compatible = "allwinner,sun20i-d1-musb",
+	  .data = &sun20i_d1_musb_cfg, },
 	{ .compatible = "allwinner,sun4i-a10-musb",
 	  .data = &sun4i_a10_musb_cfg, },
 	{ .compatible = "allwinner,sun6i-a31-musb",
