@@ -161,6 +161,7 @@ struct rtw_sdio_txpg {
 	struct mutex lock;
 	bool valid;
 	u16 free[RTW_SDIO_TXPG_NUM];
+	u8 oqt_free;
 };
 
 struct rtw_sdio {
@@ -176,6 +177,7 @@ struct rtw_sdio {
 	struct rtw_sdio_work_data *tx_handler_data;
 	struct sk_buff_head tx_queue[RTK_MAX_TX_QUEUE_NUM];
 	struct rtw_sdio_txpg txpg;
+	u8 *tx_agg_buf;
 };
 
 extern const struct dev_pm_ops rtw_sdio_pm_ops;
