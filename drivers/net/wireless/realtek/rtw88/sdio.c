@@ -1162,7 +1162,8 @@ static void rtw_sdio_handle_interrupt(struct sdio_func *sdio_func)
 		rtw_sdio_rx_isr(rtwdev);
 	}
 
-	rtw_write32(rtwdev, REG_SDIO_HISR, hisr);
+	if (hisr)
+		rtw_write32(rtwdev, REG_SDIO_HISR, hisr);
 
 	rtwsdio->irq_thread = NULL;
 }
