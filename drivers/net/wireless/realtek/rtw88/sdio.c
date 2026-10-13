@@ -20,6 +20,7 @@
 #include "tx.h"
 
 #define RTW_SDIO_INDIRECT_RW_RETRIES			50
+#define RTW_SDIO_TX_BUSY_SLEEP_US			50
 
 static bool rtw_sdio_is_bus_addr(u32 addr)
 {
@@ -548,41 +549,43 @@ static int rtw_sdio_read_port(struct rtw_dev *rtwdev, u8 *buf, size_t count)
 	return ret;
 }
 
-static int rtw_sdio_check_free_txpg(struct rtw_dev *rtwdev, u8 queue,
-				    size_t count)
+static int rtw_sdio_txpg_pool(struct rtw_dev *rtwdev,
+			      enum rtw_tx_queue_type queue)
 {
-	unsigned int pages_free, pages_needed;
+	switch (queue) {
+	case RTW_TX_QUEUE_BCN:
+	case RTW_TX_QUEUE_H2C:
+	case RTW_TX_QUEUE_HI0:
+		return RTW_SDIO_TXPG_HIGH;
+	case RTW_TX_QUEUE_MGMT:
+		if (rtw_chip_wcpu_8051(rtwdev))
+			return RTW_SDIO_TXPG_HIGH;
+		return RTW_SDIO_TXPG_EXTRA;
+	case RTW_TX_QUEUE_VI:
+	case RTW_TX_QUEUE_VO:
+		return RTW_SDIO_TXPG_NORMAL;
+	case RTW_TX_QUEUE_BE:
+	case RTW_TX_QUEUE_BK:
+		return RTW_SDIO_TXPG_LOW;
+	default:
+		rtw_warn(rtwdev, "Unknown mapping for queue %u\n", queue);
+		return -EINVAL;
+	}
+}
+
+static void rtw_sdio_read_free_txpg(struct rtw_dev *rtwdev)
+{
+	struct rtw_sdio *rtwsdio = (struct rtw_sdio *)rtwdev->priv;
+	u16 *free = rtwsdio->txpg.free;
 
 	if (rtw_chip_wcpu_8051(rtwdev)) {
-		u32 free_txpg;
+		u32 free_txpg = rtw_sdio_read32(rtwdev, REG_SDIO_FREE_TXPG);
 
-		free_txpg = rtw_sdio_read32(rtwdev, REG_SDIO_FREE_TXPG);
-
-		switch (queue) {
-		case RTW_TX_QUEUE_BCN:
-		case RTW_TX_QUEUE_H2C:
-		case RTW_TX_QUEUE_HI0:
-		case RTW_TX_QUEUE_MGMT:
-			/* high */
-			pages_free = free_txpg & 0xff;
-			break;
-		case RTW_TX_QUEUE_VI:
-		case RTW_TX_QUEUE_VO:
-			/* normal */
-			pages_free = (free_txpg >> 8) & 0xff;
-			break;
-		case RTW_TX_QUEUE_BE:
-		case RTW_TX_QUEUE_BK:
-			/* low */
-			pages_free = (free_txpg >> 16) & 0xff;
-			break;
-		default:
-			rtw_warn(rtwdev, "Unknown mapping for queue %u\n", queue);
-			return -EINVAL;
-		}
-
-		/* add the pages from the public queue */
-		pages_free += (free_txpg >> 24) & 0xff;
+		free[RTW_SDIO_TXPG_HIGH] = free_txpg & 0xff;
+		free[RTW_SDIO_TXPG_NORMAL] = (free_txpg >> 8) & 0xff;
+		free[RTW_SDIO_TXPG_LOW] = (free_txpg >> 16) & 0xff;
+		free[RTW_SDIO_TXPG_EXTRA] = 0;
+		free[RTW_SDIO_TXPG_PUBLIC] = (free_txpg >> 24) & 0xff;
 	} else {
 		u32 free_txpg[3];
 
@@ -590,50 +593,74 @@ static int rtw_sdio_check_free_txpg(struct rtw_dev *rtwdev, u8 queue,
 		free_txpg[1] = rtw_sdio_read32(rtwdev, REG_SDIO_FREE_TXPG + 4);
 		free_txpg[2] = rtw_sdio_read32(rtwdev, REG_SDIO_FREE_TXPG + 8);
 
-		switch (queue) {
-		case RTW_TX_QUEUE_BCN:
-		case RTW_TX_QUEUE_H2C:
-		case RTW_TX_QUEUE_HI0:
-			/* high */
-			pages_free = free_txpg[0] & 0xfff;
-			break;
-		case RTW_TX_QUEUE_VI:
-		case RTW_TX_QUEUE_VO:
-			/* normal */
-			pages_free = (free_txpg[0] >> 16) & 0xfff;
-			break;
-		case RTW_TX_QUEUE_BE:
-		case RTW_TX_QUEUE_BK:
-			/* low */
-			pages_free = free_txpg[1] & 0xfff;
-			break;
-		case RTW_TX_QUEUE_MGMT:
-			/* extra */
-			pages_free = free_txpg[2] & 0xfff;
-			break;
-		default:
-			rtw_warn(rtwdev, "Unknown mapping for queue %u\n", queue);
-			return -EINVAL;
-		}
-
-		/* add the pages from the public queue */
-		pages_free += (free_txpg[1] >> 16) & 0xfff;
+		free[RTW_SDIO_TXPG_HIGH] = free_txpg[0] & 0xfff;
+		free[RTW_SDIO_TXPG_NORMAL] = (free_txpg[0] >> 16) & 0xfff;
+		free[RTW_SDIO_TXPG_LOW] = free_txpg[1] & 0xfff;
+		free[RTW_SDIO_TXPG_EXTRA] = free_txpg[2] & 0xfff;
+		free[RTW_SDIO_TXPG_PUBLIC] = (free_txpg[1] >> 16) & 0xfff;
 	}
-
-	pages_needed = DIV_ROUND_UP(count, rtwdev->chip->page_size);
-
-	if (pages_needed > pages_free) {
-		rtw_dbg(rtwdev, RTW_DBG_SDIO,
-			"Not enough free pages (%u needed, %u free) in queue %u for %zu bytes\n",
-			pages_needed, pages_free, queue, count);
-		return -EBUSY;
-	}
-
-	return 0;
 }
 
-static int rtw_sdio_write_port(struct rtw_dev *rtwdev, struct sk_buff *skb,
-			       enum rtw_tx_queue_type queue)
+static unsigned int rtw_sdio_txpg_avail(struct rtw_sdio *rtwsdio, int pool)
+{
+	return rtwsdio->txpg.free[pool] +
+	       rtwsdio->txpg.free[RTW_SDIO_TXPG_PUBLIC];
+}
+
+/* Reserve TX FIFO pages for one write. The cached count only shrinks
+ * between register reads, so it never overstates the free space.
+ */
+static int rtw_sdio_reserve_txpg(struct rtw_dev *rtwdev,
+				 enum rtw_tx_queue_type queue,
+				 unsigned int pages)
+{
+	struct rtw_sdio *rtwsdio = (struct rtw_sdio *)rtwdev->priv;
+	struct rtw_sdio_txpg *txpg = &rtwsdio->txpg;
+	u16 *free = txpg->free;
+	unsigned int dedicated;
+	int pool, ret = 0;
+
+	pool = rtw_sdio_txpg_pool(rtwdev, queue);
+	if (pool < 0)
+		return pool;
+
+	mutex_lock(&txpg->lock);
+
+	if (!txpg->valid || rtw_sdio_txpg_avail(rtwsdio, pool) < pages) {
+		rtw_sdio_read_free_txpg(rtwdev);
+		txpg->valid = true;
+	}
+
+	if (rtw_sdio_txpg_avail(rtwsdio, pool) < pages) {
+		rtw_dbg(rtwdev, RTW_DBG_SDIO,
+			"Not enough free pages (%u needed) in queue %u\n",
+			pages, queue);
+		ret = -EBUSY;
+		goto out;
+	}
+
+	/* Use the dedicated pages first, then the public pages. */
+	dedicated = min_t(unsigned int, pages, free[pool]);
+	free[pool] -= dedicated;
+	free[RTW_SDIO_TXPG_PUBLIC] -= pages - dedicated;
+
+out:
+	mutex_unlock(&txpg->lock);
+
+	return ret;
+}
+
+static void rtw_sdio_invalidate_txpg(struct rtw_dev *rtwdev)
+{
+	struct rtw_sdio *rtwsdio = (struct rtw_sdio *)rtwdev->priv;
+
+	mutex_lock(&rtwsdio->txpg.lock);
+	rtwsdio->txpg.valid = false;
+	mutex_unlock(&rtwsdio->txpg.lock);
+}
+
+static int rtw_sdio_write_fifo(struct rtw_dev *rtwdev, const u8 *buf,
+			       size_t len, enum rtw_tx_queue_type queue)
 {
 	struct rtw_sdio *rtwsdio = (struct rtw_sdio *)rtwdev->priv;
 	bool bus_claim;
@@ -641,26 +668,18 @@ static int rtw_sdio_write_port(struct rtw_dev *rtwdev, struct sk_buff *skb,
 	u32 txaddr;
 	int ret;
 
-	txaddr = rtw_sdio_get_tx_addr(rtwdev, skb->len, queue);
+	txaddr = rtw_sdio_get_tx_addr(rtwdev, len, queue);
 	if (!txaddr)
 		return -EINVAL;
 
-	txsize = sdio_align_size(rtwsdio->sdio_func, skb->len);
-
-	ret = rtw_sdio_check_free_txpg(rtwdev, queue, txsize);
-	if (ret)
-		return ret;
-
-	if (!IS_ALIGNED((unsigned long)skb->data, RTW_SDIO_DATA_PTR_ALIGN))
-		rtw_warn(rtwdev, "Got unaligned SKB in %s() for queue %u\n",
-			 __func__, queue);
+	txsize = sdio_align_size(rtwsdio->sdio_func, len);
 
 	bus_claim = rtw_sdio_bus_claim_needed(rtwsdio);
 
 	if (bus_claim)
 		sdio_claim_host(rtwsdio->sdio_func);
 
-	ret = sdio_memcpy_toio(rtwsdio->sdio_func, txaddr, skb->data, txsize);
+	ret = sdio_memcpy_toio(rtwsdio->sdio_func, txaddr, (void *)buf, txsize);
 
 	if (bus_claim)
 		sdio_release_host(rtwsdio->sdio_func);
@@ -669,6 +688,31 @@ static int rtw_sdio_write_port(struct rtw_dev *rtwdev, struct sk_buff *skb,
 		rtw_warn(rtwdev,
 			 "Failed to write %zu byte(s) to SDIO port 0x%08x",
 			 txsize, txaddr);
+
+	return ret;
+}
+
+static int rtw_sdio_write_port(struct rtw_dev *rtwdev, struct sk_buff *skb,
+			       enum rtw_tx_queue_type queue)
+{
+	unsigned int pages = DIV_ROUND_UP(skb->len, rtwdev->chip->page_size);
+	int ret;
+
+	ret = rtw_sdio_reserve_txpg(rtwdev, queue, pages);
+	if (ret)
+		return ret;
+
+	if (!IS_ALIGNED((unsigned long)skb->data, RTW_SDIO_DATA_PTR_ALIGN))
+		rtw_warn(rtwdev, "Got unaligned SKB in %s() for queue %u\n",
+			 __func__, queue);
+
+	ret = rtw_sdio_write_fifo(rtwdev, skb->data, skb->len, queue);
+
+	/* Re-read the FIFO state after an error and after writes to the
+	 * reserved pages or to the H2C queue.
+	 */
+	if (ret || queue == RTW_TX_QUEUE_BCN || queue == RTW_TX_QUEUE_H2C)
+		rtw_sdio_invalidate_txpg(rtwdev);
 
 	return ret;
 }
@@ -751,6 +795,7 @@ static int rtw_sdio_setup(struct rtw_dev *rtwdev)
 
 static int rtw_sdio_start(struct rtw_dev *rtwdev)
 {
+	rtw_sdio_invalidate_txpg(rtwdev);
 	rtw_sdio_enable_rx_aggregation(rtwdev);
 	rtw_sdio_enable_interrupt(rtwdev);
 
@@ -1231,8 +1276,8 @@ static void rtw_sdio_indicate_tx_status(struct rtw_dev *rtwdev,
 	ieee80211_tx_status_irqsafe(hw, skb);
 }
 
-static void rtw_sdio_process_tx_queue(struct rtw_dev *rtwdev,
-				      enum rtw_tx_queue_type queue)
+static int rtw_sdio_process_tx_queue(struct rtw_dev *rtwdev,
+				     enum rtw_tx_queue_type queue)
 {
 	struct rtw_sdio *rtwsdio = (struct rtw_sdio *)rtwdev->priv;
 	struct sk_buff *skb;
@@ -1240,15 +1285,17 @@ static void rtw_sdio_process_tx_queue(struct rtw_dev *rtwdev,
 
 	skb = skb_dequeue(&rtwsdio->tx_queue[queue]);
 	if (!skb)
-		return;
+		return 0;
 
 	ret = rtw_sdio_write_port(rtwdev, skb, queue);
 	if (ret) {
 		skb_queue_head(&rtwsdio->tx_queue[queue], skb);
-		return;
+		return ret;
 	}
 
 	rtw_sdio_indicate_tx_status(rtwdev, skb);
+
+	return 0;
 }
 
 static void rtw_sdio_tx_handler(struct work_struct *work)
@@ -1257,7 +1304,7 @@ static void rtw_sdio_tx_handler(struct work_struct *work)
 		container_of(work, struct rtw_sdio_work_data, work);
 	struct rtw_sdio *rtwsdio;
 	struct rtw_dev *rtwdev;
-	int limit, queue;
+	int limit, queue, ret;
 
 	rtwdev = work_data->rtwdev;
 	rtwsdio = (struct rtw_sdio *)rtwdev->priv;
@@ -1267,10 +1314,15 @@ static void rtw_sdio_tx_handler(struct work_struct *work)
 
 	for (queue = RTK_MAX_TX_QUEUE_NUM - 1; queue >= 0; queue--) {
 		for (limit = 0; limit < 1000; limit++) {
-			rtw_sdio_process_tx_queue(rtwdev, queue);
+			ret = rtw_sdio_process_tx_queue(rtwdev, queue);
 
 			if (skb_queue_empty(&rtwsdio->tx_queue[queue]))
 				break;
+
+			/* Let the FIFO drain instead of polling it back to back. */
+			if (ret == -EBUSY)
+				usleep_range(RTW_SDIO_TX_BUSY_SLEEP_US,
+					     2 * RTW_SDIO_TX_BUSY_SLEEP_US);
 		}
 	}
 }
@@ -1296,6 +1348,7 @@ static int rtw_sdio_init_tx(struct rtw_dev *rtwdev)
 
 	for (i = 0; i < RTK_MAX_TX_QUEUE_NUM; i++)
 		skb_queue_head_init(&rtwsdio->tx_queue[i]);
+	mutex_init(&rtwsdio->txpg.lock);
 	rtwsdio->tx_handler_data = kmalloc_obj(*rtwsdio->tx_handler_data);
 	if (!rtwsdio->tx_handler_data)
 		goto err_destroy_wq;

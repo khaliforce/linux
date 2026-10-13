@@ -147,6 +147,22 @@ struct rtw_sdio_work_data {
 	struct rtw_dev *rtwdev;
 };
 
+enum rtw_sdio_txpg_pool {
+	RTW_SDIO_TXPG_HIGH,
+	RTW_SDIO_TXPG_NORMAL,
+	RTW_SDIO_TXPG_LOW,
+	RTW_SDIO_TXPG_EXTRA,
+	RTW_SDIO_TXPG_PUBLIC,
+	RTW_SDIO_TXPG_NUM,
+};
+
+struct rtw_sdio_txpg {
+	/* Protects the cached TX FIFO state below */
+	struct mutex lock;
+	bool valid;
+	u16 free[RTW_SDIO_TXPG_NUM];
+};
+
 struct rtw_sdio {
 	struct sdio_func *sdio_func;
 
@@ -159,6 +175,7 @@ struct rtw_sdio {
 	struct workqueue_struct *txwq;
 	struct rtw_sdio_work_data *tx_handler_data;
 	struct sk_buff_head tx_queue[RTK_MAX_TX_QUEUE_NUM];
+	struct rtw_sdio_txpg txpg;
 };
 
 extern const struct dev_pm_ops rtw_sdio_pm_ops;
