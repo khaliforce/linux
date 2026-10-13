@@ -9,6 +9,7 @@
 #include <linux/module.h>
 #include <linux/mmc/host.h>
 #include <linux/mmc/sdio_func.h>
+#include <linux/unaligned.h>
 #include "main.h"
 #include "mac.h"
 #include "debug.h"
@@ -1141,6 +1142,58 @@ static void rtw_sdio_rx_isr(struct rtw_dev *rtwdev)
 	} while (total_rx_bytes < SZ_64K && hisr & REG_SDIO_HISR_RX_REQUEST);
 }
 
+/* REG_SDIO_HISR and REG_SDIO_RX0_REQ_LEN are adjacent. One CMD53 reads
+ * both and replaces a 32-bit read and two CMD52 reads.
+ */
+static int rtw_sdio_read_irq_status(struct rtw_dev *rtwdev, u32 *hisr,
+				    u32 *rx_len)
+{
+	struct rtw_sdio *rtwsdio = (struct rtw_sdio *)rtwdev->priv;
+	u32 addr = rtw_sdio_to_bus_offset(rtwdev, REG_SDIO_HISR);
+	u8 *buf = rtwsdio->irq_status_buf;
+	int ret;
+
+	ret = sdio_memcpy_fromio(rtwsdio->sdio_func, buf, addr, 8);
+	if (ret) {
+		rtw_warn(rtwdev, "Failed to read the interrupt status: %d\n",
+			 ret);
+		return ret;
+	}
+
+	*hisr = get_unaligned_le32(buf);
+	*rx_len = get_unaligned_le16(buf + 4);
+
+	return 0;
+}
+
+static void rtw_sdio_handle_interrupt_8051(struct rtw_dev *rtwdev)
+{
+	u32 hisr, rx_len, clear, total_rx_bytes = 0;
+
+	if (rtw_sdio_read_irq_status(rtwdev, &hisr, &rx_len))
+		return;
+
+	clear = hisr & ~REG_SDIO_HISR_RX_REQUEST;
+
+	if (hisr & REG_SDIO_HISR_TXERR)
+		rtw_sdio_tx_err_isr(rtwdev);
+
+	/* Stop if no RX request is pending, even if rx_len is not zero.
+	 * HW or FW may still fill the RX buffer.
+	 */
+	while ((hisr & REG_SDIO_HISR_RX_REQUEST) && rx_len &&
+	       total_rx_bytes < SZ_64K) {
+		rtw_sdio_rxfifo_recv(rtwdev, rx_len);
+		total_rx_bytes += rx_len;
+
+		if (rtw_sdio_read_irq_status(rtwdev, &hisr, &rx_len))
+			break;
+	}
+
+	if (clear)
+		rtw_write32(rtwdev, REG_SDIO_HISR, clear);
+}
+
 static void rtw_sdio_handle_interrupt(struct sdio_func *sdio_func)
 {
 	struct ieee80211_hw *hw = sdio_get_drvdata(sdio_func);
@@ -1152,6 +1205,12 @@ static void rtw_sdio_handle_interrupt(struct sdio_func *sdio_func)
 	rtwsdio = (struct rtw_sdio *)rtwdev->priv;
 
 	rtwsdio->irq_thread = current;
+
+	if (rtw_chip_wcpu_8051(rtwdev)) {
+		rtw_sdio_handle_interrupt_8051(rtwdev);
+		rtwsdio->irq_thread = NULL;
+		return;
+	}
 
 	hisr = rtw_read32(rtwdev, REG_SDIO_HISR);
 
@@ -1502,6 +1561,7 @@ int rtw_sdio_probe(struct sdio_func *sdio_func,
 		   const struct sdio_device_id *id)
 {
 	struct ieee80211_hw *hw;
+	struct rtw_sdio *rtwsdio;
 	struct rtw_dev *rtwdev;
 	int drv_data_size;
 	int ret;
@@ -1519,6 +1579,7 @@ int rtw_sdio_probe(struct sdio_func *sdio_func,
 	rtwdev->chip = (struct rtw_chip_info *)id->driver_data;
 	rtwdev->hci.ops = &rtw_sdio_ops;
 	rtwdev->hci.type = RTW_HCI_TYPE_SDIO;
+	rtwsdio = (struct rtw_sdio *)rtwdev->priv;
 
 	ret = rtw_core_init(rtwdev);
 	if (ret)
@@ -1535,6 +1596,12 @@ int rtw_sdio_probe(struct sdio_func *sdio_func,
 	}
 
 	rtw_sdio_init(rtwdev);
+
+	rtwsdio->irq_status_buf = devm_kmalloc(rtwdev->dev, 8, GFP_KERNEL);
+	if (!rtwsdio->irq_status_buf) {
+		ret = -ENOMEM;
+		goto err_sdio_declaim;
+	}
 
 	ret = rtw_sdio_init_tx(rtwdev);
 	if (ret) {

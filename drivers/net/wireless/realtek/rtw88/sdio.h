@@ -178,6 +178,7 @@ struct rtw_sdio {
 	struct sk_buff_head tx_queue[RTK_MAX_TX_QUEUE_NUM];
 	struct rtw_sdio_txpg txpg;
 	u8 *tx_agg_buf;
+	u8 *irq_status_buf;
 };
 
 extern const struct dev_pm_ops rtw_sdio_pm_ops;
