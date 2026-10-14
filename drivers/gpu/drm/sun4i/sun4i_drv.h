@@ -13,6 +13,8 @@
 #include <linux/list.h>
 #include <linux/regmap.h>
 
+extern bool sun4i_cached_fb;
+
 struct sun4i_drv {
 	struct list_head	engine_list;
 	struct list_head	frontend_list;

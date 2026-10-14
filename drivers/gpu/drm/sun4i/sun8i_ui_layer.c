@@ -198,6 +198,9 @@ static void sun8i_ui_layer_atomic_update(struct drm_plane *plane,
 		return;
 	}
 
+	/* Write the cached frame buffer back to RAM (no effect on write-combined buffers) */
+	drm_fb_dma_sync_non_coherent(plane->dev, drm_atomic_get_old_plane_state(state, plane), new_state);
+
 	sun8i_ui_layer_update_attributes(layer, plane);
 	sun8i_ui_layer_update_coord(layer, plane);
 	sun8i_ui_layer_update_buffer(layer, plane);
