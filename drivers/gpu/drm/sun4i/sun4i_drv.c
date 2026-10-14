@@ -32,14 +32,57 @@
 #include "sun4i_tcon.h"
 #include "sun8i_tcon_top.h"
 
+/*
+ * Frame buffers in write-combined memory accept only about 390 MB/s of writes on the D1.
+ * Cached memory is several times faster, but the display engine does not see CPU writes
+ * until the CPU cache is cleaned. The frame buffer .dirty hook and the plane update clean
+ * the cache. Off by default: sun4i_drm.cached_fb=1 turns it on.
+ */
+bool sun4i_cached_fb;
+module_param_named(cached_fb, sun4i_cached_fb, bool, 0444);
+MODULE_PARM_DESC(cached_fb, "Use cached memory for frame buffers (default: off)");
+
+/*
+ * Cached buffers need physically contiguous memory. If that is not available (for example a
+ * 4K screen), the buffer is created again in write-combined memory. The screen must not stay dark.
+ */
+static DEFINE_MUTEX(sun4i_dumb_lock);
+static bool sun4i_wc_only;
+
+static struct drm_gem_object *sun4i_gem_create_object(struct drm_device *drm, size_t size)
+{
+	struct drm_gem_dma_object *obj;
+
+	obj = kzalloc(sizeof(*obj), GFP_KERNEL);
+	if (!obj)
+		return ERR_PTR(-ENOMEM);
+
+	obj->map_noncoherent = sun4i_cached_fb && !sun4i_wc_only;
+
+	return &obj->base;
+}
+
 static int drm_sun4i_gem_dumb_create(struct drm_file *file_priv,
 				     struct drm_device *drm,
 				     struct drm_mode_create_dumb *args)
 {
+	int ret;
+
 	/* The hardware only allows even pitches for YUV buffers. */
 	args->pitch = ALIGN(DIV_ROUND_UP(args->width * args->bpp, 8), 2);
 
-	return drm_gem_dma_dumb_create_internal(file_priv, drm, args);
+	mutex_lock(&sun4i_dumb_lock);
+	ret = drm_gem_dma_dumb_create_internal(file_priv, drm, args);
+	if (ret == -ENOMEM && sun4i_cached_fb) {
+		sun4i_wc_only = true;
+		ret = drm_gem_dma_dumb_create_internal(file_priv, drm, args);
+		sun4i_wc_only = false;
+		if (!ret)
+			drm_info(drm, "no contiguous memory for a cached buffer, using write-combined memory\n");
+	}
+	mutex_unlock(&sun4i_dumb_lock);
+
+	return ret;
 }
 
 DEFINE_DRM_GEM_DMA_FOPS(sun4i_drv_fops);
@@ -55,6 +98,7 @@ static const struct drm_driver sun4i_drv_driver = {
 	.minor			= 0,
 
 	/* GEM Operations */
+	.gem_create_object	= sun4i_gem_create_object,
 	DRM_GEM_DMA_DRIVER_OPS_WITH_DUMB_CREATE(drm_sun4i_gem_dumb_create),
 	DRM_FBDEV_DMA_DRIVER_OPS,
 };
