@@ -410,6 +410,27 @@ static int cedrus_s_fmt_vid_out(struct file *file, void *priv,
 	return cedrus_s_fmt_vid_out_p(cedrus_file2ctx(file), &f->fmt.pix);
 }
 
+/*
+ * The CPU reads decoded frames for software color conversion. Uncached DMA memory reads
+ * at 60 MB/s on the D1. Cached memory reads at 2 GB/s. Applications do not ask for cached
+ * memory, so request it for them. Both calls need the same flag.
+ */
+static int cedrus_reqbufs(struct file *file, void *priv, struct v4l2_requestbuffers *rb)
+{
+	if (rb->type == V4L2_BUF_TYPE_VIDEO_CAPTURE)
+		rb->flags |= V4L2_MEMORY_FLAG_NON_COHERENT;
+
+	return v4l2_m2m_ioctl_reqbufs(file, priv, rb);
+}
+
+static int cedrus_create_bufs(struct file *file, void *priv, struct v4l2_create_buffers *cb)
+{
+	if (cb->format.type == V4L2_BUF_TYPE_VIDEO_CAPTURE)
+		cb->flags |= V4L2_MEMORY_FLAG_NON_COHERENT;
+
+	return v4l2_m2m_ioctl_create_bufs(file, priv, cb);
+}
+
 const struct v4l2_ioctl_ops cedrus_ioctl_ops = {
 	.vidioc_querycap		= cedrus_querycap,
 
@@ -423,12 +444,12 @@ const struct v4l2_ioctl_ops cedrus_ioctl_ops = {
 	.vidioc_try_fmt_vid_out		= cedrus_try_fmt_vid_out,
 	.vidioc_s_fmt_vid_out		= cedrus_s_fmt_vid_out,
 
-	.vidioc_reqbufs			= v4l2_m2m_ioctl_reqbufs,
+	.vidioc_reqbufs			= cedrus_reqbufs,
 	.vidioc_querybuf		= v4l2_m2m_ioctl_querybuf,
 	.vidioc_qbuf			= v4l2_m2m_ioctl_qbuf,
 	.vidioc_dqbuf			= v4l2_m2m_ioctl_dqbuf,
 	.vidioc_prepare_buf		= v4l2_m2m_ioctl_prepare_buf,
-	.vidioc_create_bufs		= v4l2_m2m_ioctl_create_bufs,
+	.vidioc_create_bufs		= cedrus_create_bufs,
 	.vidioc_expbuf			= v4l2_m2m_ioctl_expbuf,
 
 	.vidioc_streamon		= v4l2_m2m_ioctl_streamon,
@@ -613,6 +634,7 @@ int cedrus_queue_init(void *priv, struct vb2_queue *src_vq,
 	dst_vq->buf_struct_size = sizeof(struct cedrus_buffer);
 	dst_vq->ops = &cedrus_qops;
 	dst_vq->mem_ops = &vb2_dma_contig_memops;
+	dst_vq->allow_cache_hints = 1;
 	dst_vq->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_COPY;
 	dst_vq->lock = &ctx->dev->dev_mutex;
 	dst_vq->dev = ctx->dev->dev;
