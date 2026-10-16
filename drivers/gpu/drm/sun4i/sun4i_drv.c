@@ -36,11 +36,11 @@
  * Frame buffers in write-combined memory accept only about 390 MB/s of writes on the D1.
  * Cached memory is several times faster, but the display engine does not see CPU writes
  * until the CPU cache is cleaned. The frame buffer .dirty hook and the plane update clean
- * the cache. Off by default: sun4i_drm.cached_fb=1 turns it on.
+ * the cache. On by default: sun4i_drm.cached_fb=0 turns it off.
  */
-bool sun4i_cached_fb;
+bool sun4i_cached_fb = true;
 module_param_named(cached_fb, sun4i_cached_fb, bool, 0444);
-MODULE_PARM_DESC(cached_fb, "Use cached memory for frame buffers (default: off)");
+MODULE_PARM_DESC(cached_fb, "Use cached memory for frame buffers (default: on)");
 
 /*
  * Cached buffers need physically contiguous memory. If that is not available (for example a
