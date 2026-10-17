@@ -37,9 +37,10 @@
  * Cached memory is several times faster, but the display engine does not see CPU writes
  * until the CPU cache is cleaned. The frame buffer .dirty hook and the plane update clean
  * the cache. On by default: sun4i_drm.cached_fb=0 turns it off.
+ * Change it at run time. A new frame buffer uses the value at the time it is created.
  */
 bool sun4i_cached_fb = true;
-module_param_named(cached_fb, sun4i_cached_fb, bool, 0444);
+module_param_named(cached_fb, sun4i_cached_fb, bool, 0644);
 MODULE_PARM_DESC(cached_fb, "Use cached memory for frame buffers (default: on)");
 
 /*
