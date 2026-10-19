@@ -1742,7 +1742,7 @@ int sunxi_pinctrl_init_with_flags(struct platform_device *pdev,
 			    pctl->desc->pin_base;
 	pctl->chip->label = dev_name(&pdev->dev);
 	pctl->chip->parent = &pdev->dev;
-	pctl->chip->base = pctl->desc->pin_base;
+	pctl->chip->base = -1;
 
 	ret = gpiochip_add_data(pctl->chip, pctl);
 	if (ret)
