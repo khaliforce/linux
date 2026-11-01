@@ -51,6 +51,7 @@
 			reset-names = "ctrl";
 			phys = <&hdmi_phy>;
 			phy-names = "phy";
+			#sound-dai-cells = <0>;
 			status = "disabled";
 
 			ports {
