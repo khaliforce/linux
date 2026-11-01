@@ -125,8 +125,8 @@
 };
 
 &i2s2 {
-	assigned-clocks = <&ccu CLK_PLL_AUDIO0_4X>;
-	assigned-clock-rates = <98304000>;
+	assigned-clocks = <&ccu CLK_I2S2>;
+	assigned-clock-parents = <&ccu CLK_PLL_AUDIO0_4X>;
 	status = "okay";
 };
 
