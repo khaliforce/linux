@@ -163,13 +163,14 @@ static struct ccu_nkmp pll_ve_clk = {
 
 /*
  * PLL_AUDIO0 has m0, m1 dividers in addition to the usual N, M factors.
- * Since we only need one frequency from this PLL (22.5792 x 4 == 90.3168 MHz),
+ * Since audio needs 90.3168 MHz and 98.304 MHz from this PLL,
  * ignore them for now. Enforce the default for them, which is m1 = 0, m0 = 0.
  * The M factor must be an even number to produce a 50% duty cycle output.
  */
 #define SUN20I_D1_PLL_AUDIO0_REG		0x078
 static struct ccu_sdm_setting pll_audio0_sdm_table[] = {
 	{ .rate = 90316800, .pattern = 0xc001288d, .m = 6, .n = 22 },
+	{ .rate = 98304000, .pattern = 0xc001eb85, .m = 10, .n = 40 },
 };
 
 static struct ccu_nm pll_audio0_4x_clk = {
@@ -179,7 +180,7 @@ static struct ccu_nm pll_audio0_4x_clk = {
 	.m		= _SUNXI_CCU_DIV(16, 6),
 	.sdm		= _SUNXI_CCU_SDM(pll_audio0_sdm_table, BIT(24),
 					 0x178, BIT(31)),
-	.min_rate	= 180000000U,
+	.min_rate	= 90000000U,
 	.max_rate	= 3000000000U,
 	.common		= {
 		.reg		= 0x078,
@@ -557,7 +558,7 @@ static SUNXI_CCU_MP_HW_WITH_MUX_GATE(i2s2_clk, "i2s2", i2s_spdif_tx_parents, 0xa
 				     8, 2,	/* P */
 				     24, 3,	/* mux */
 				     BIT(31),	/* gate */
-				     0);
+				     CLK_SET_RATE_PARENT | CLK_SET_RATE_NO_REPARENT);
 
 static const struct clk_hw *i2s2_asrc_parents[] = {
 	&pll_audio0_4x_clk.common.hw,
