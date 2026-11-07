@@ -68,6 +68,9 @@ struct ksmbd_conn {
 		u8			inet6_addr[16];
 #endif
 	};
+#if IS_ENABLED(CONFIG_IPV6)
+	bool				is_ipv6;
+#endif
 	unsigned int			inet_hash;
 	char				*request_buf;
 	struct ksmbd_transport		*transport;
@@ -111,8 +114,6 @@ struct ksmbd_conn {
 	char				ClientGUID[SMB2_CLIENT_GUID_SIZE];
 	struct ntlmssp_auth		ntlmssp;
 
-	spinlock_t			llist_lock;
-	struct list_head		lock_list;
 
 	struct preauth_integrity_info	*preauth_info;
 

@@ -104,6 +104,7 @@ static struct tcp_transport *alloc_transport(struct socket *client_sk)
 	if (client_sk->sk->sk_family == AF_INET6) {
 		memcpy(&conn->inet6_addr, &client_sk->sk->sk_v6_daddr, 16);
 		conn->inet_hash = ipv6_addr_hash(&client_sk->sk->sk_v6_daddr);
+		conn->is_ipv6 = true;
 	} else {
 		conn->inet_addr = inet_sk(client_sk->sk)->inet_daddr;
 		conn->inet_hash = ipv4_addr_hash(inet_sk(client_sk->sk)->inet_daddr);
@@ -572,7 +573,7 @@ static void ksmbd_tcp_tx_work(struct work_struct *work)
 	if (READ_ONCE(t->tx_stopped))
 		ksmbd_tcp_purge_tx(t);
 	else if (!list_empty(&t->tx_queue))
-		queue_delayed_work(system_unbound_wq, &t->tx_work, delay);
+		queue_delayed_work(system_dfl_wq, &t->tx_work, delay);
 	mutex_unlock(&t->tx_lock);
 	wake_up_all(&t->transport.conn->req_running_q);
 
@@ -589,7 +590,7 @@ static void ksmbd_tcp_write_space(struct sock *sk)
 	if (t) {
 		t->write_space(sk);
 		if (!READ_ONCE(t->tx_stopped) && sk_stream_is_writeable(sk))
-			mod_delayed_work(system_unbound_wq, &t->tx_work, 0);
+			mod_delayed_work(system_dfl_wq, &t->tx_work, 0);
 	}
 	read_unlock_bh(&sk->sk_callback_lock);
 }
@@ -686,7 +687,7 @@ static int ksmbd_tcp_writev(struct ksmbd_transport *t,
 	msg->deadline = deadline;
 	list_add_tail(&msg->list, &tt->tx_queue);
 	WRITE_ONCE(tt->tx_queued, tt->tx_queued + msg->len);
-	queue_delayed_work(system_unbound_wq, &tt->tx_work, 0);
+	queue_delayed_work(system_dfl_wq, &tt->tx_work, 0);
 
 accepted:
 	tt->tx_end += tx->size;
@@ -945,10 +946,15 @@ static void ksmbd_tcp_stop_listener(struct interface *iface)
 void ksmbd_tcp_destroy(void)
 {
 	struct interface *iface, *tmp;
+	LIST_HEAD(iface_list_to_free);
 
 	unregister_netdevice_notifier(&ksmbd_netdev_notifier);
 
-	list_for_each_entry_safe(iface, tmp, &iface_list, entry) {
+	rtnl_lock();
+	list_splice_init(&iface_list, &iface_list_to_free);
+	rtnl_unlock();
+
+	list_for_each_entry_safe(iface, tmp, &iface_list_to_free, entry) {
 		ksmbd_tcp_stop_listener(iface);
 		list_del(&iface->entry);
 		kfree(iface->name);

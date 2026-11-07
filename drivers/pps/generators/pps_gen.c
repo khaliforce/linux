@@ -103,11 +103,14 @@ static long pps_gen_cdev_ioctl(struct file *file,
 		dev_dbg(&pps_gen->dev, "PPS_GEN_FETCHEVENT\n");
 
 		ret = wait_event_interruptible(pps_gen->queue,
-				ev != pps_gen->last_ev);
+				ev != pps_gen->last_ev ||
+				!READ_ONCE(pps_gen->info));
 		if (ret == -ERESTARTSYS) {
 			dev_dbg(&pps_gen->dev, "pending signal caught\n");
 			return -EINTR;
 		}
+		if (!READ_ONCE(pps_gen->info))
+			return -ENODEV;
 
 		spin_lock_irq(&pps_gen->lock);
 		info.sequence = pps_gen->sequence;
@@ -228,9 +231,21 @@ static void pps_gen_unregister_cdev(struct pps_gen_device *pps_gen)
 	 * An open file keeps pps_gen around, but the driver may free info as
 	 * soon as we return. The sysfs files are gone now, so wait for the
 	 * ioctls using info and make later ones fail.
+	 *
+	 * The driver may have stopped the generator before calling us, but
+	 * userspace could have enabled it again since. Nothing can enable it
+	 * after this point, so stop it here for good.
 	 */
-	scoped_guard(mutex, &pps_gen->info_lock)
-		pps_gen->info = NULL;
+	scoped_guard(mutex, &pps_gen->info_lock) {
+		if (pps_gen->enabled) {
+			pps_gen->info->enable(pps_gen, false);
+			pps_gen->enabled = false;
+		}
+		WRITE_ONCE(pps_gen->info, NULL);
+	}
+
+	/* Wake up the readers in PPS_GEN_FETCHEVENT, they fail now as well */
+	wake_up_interruptible_all(&pps_gen->queue);
 
 	put_device(&pps_gen->dev);
 }

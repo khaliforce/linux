@@ -7,6 +7,7 @@
  */
 
 #include <linux/fs.h>
+#include <kunit/visibility.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/mnt_idmapping.h>
@@ -257,7 +258,7 @@ void id_to_sid(unsigned int cid, uint sidtype, struct smb_sid *ssid)
 	ssid->num_subauth++;
 }
 
-static int sid_to_id(struct mnt_idmap *idmap,
+static int sid_to_id(const struct mnt_idmap *idmap,
 		     struct smb_sid *psid, uint sidtype,
 		     struct smb_fattr *fattr)
 {
@@ -383,7 +384,7 @@ void free_acl_state(struct posix_acl_state *state)
 	kfree(state->groups);
 }
 
-static int parse_dacl(struct mnt_idmap *idmap,
+static int parse_dacl(const struct mnt_idmap *idmap,
 		      struct smb_acl *pdacl, char *end_of_acl,
 		      struct smb_sid *pownersid, struct smb_sid *pgrpsid,
 		      struct smb_fattr *fattr)
@@ -476,10 +477,12 @@ static int parse_dacl(struct mnt_idmap *idmap,
 		ppace[i]->access_req =
 			smb_map_generic_desired_access(ppace[i]->access_req);
 
-		if (ppace[i]->sid.num_subauth >= 3 &&
+		if (ppace[i]->type == ACCESS_ALLOWED &&
+		    ppace[i]->sid.num_subauth >= 3 &&
 		    !(compare_sids(&ppace[i]->sid, &sid_unix_NFS_mode))) {
 			fattr->cf_mode =
 				le32_to_cpu(ppace[i]->sid.sub_auth[2]);
+			fattr->cf_posix_mode = true;
 			break;
 		} else if (!compare_sids(&ppace[i]->sid, pownersid)) {
 			acl_mode = access_flags_to_mode(fattr,
@@ -544,6 +547,10 @@ static int parse_dacl(struct mnt_idmap *idmap,
 			default_acl_state.users->aces[default_acl_state.users->n++].perms.allow =
 				((acl_mode & 0700) >> 6) | 0004;
 		}
+	}
+	if (fattr->cf_posix_mode) {
+		ret = 0;
+		goto out;
 	}
 
 	if (owner_found) {
@@ -619,7 +626,7 @@ out:
 	return ret;
 }
 
-static void set_posix_acl_entries_dacl(struct mnt_idmap *idmap,
+static void set_posix_acl_entries_dacl(const struct mnt_idmap *idmap,
 				       struct smb_ace *pndace,
 				       struct smb_fattr *fattr, u16 *num_aces,
 				       u16 *size, u16 existing_nt_aces,
@@ -750,7 +757,7 @@ posix_default_acl:
 	}
 }
 
-static void set_ntacl_dacl(struct mnt_idmap *idmap,
+static void set_ntacl_dacl(const struct mnt_idmap *idmap,
 			   struct smb_acl *pndacl,
 			   struct smb_acl *nt_dacl,
 			   unsigned int aces_size,
@@ -809,7 +816,7 @@ next_ace:
 	pndacl->size = cpu_to_le16(le16_to_cpu(pndacl->size) + size);
 }
 
-static void set_mode_dacl(struct mnt_idmap *idmap,
+static void set_mode_dacl(const struct mnt_idmap *idmap,
 			  struct smb_acl *pndacl, struct smb_fattr *fattr)
 {
 	struct smb_ace *pace, *pndace;
@@ -895,7 +902,7 @@ static int parse_sid(struct smb_sid *psid, char *end_of_acl)
 }
 
 /* Convert CIFS ACL to POSIX form */
-int parse_sec_desc(struct mnt_idmap *idmap, struct smb_ntsd *pntsd,
+int parse_sec_desc(const struct mnt_idmap *idmap, struct smb_ntsd *pntsd,
 		   int acl_len, struct smb_fattr *fattr)
 {
 	int rc = 0;
@@ -1032,7 +1039,7 @@ size_t smb_acl_sec_desc_scratch_len(struct smb_fattr *fattr,
 }
 
 /* Convert permission bits from mode to equivalent CIFS ACL */
-int build_sec_desc(struct mnt_idmap *idmap,
+int build_sec_desc(const struct mnt_idmap *idmap,
 		   struct smb_ntsd *pntsd, struct smb_ntsd *ppntsd,
 		   int ppntsd_size, int addition_info, __u32 *secdesclen,
 		   struct smb_fattr *fattr)
@@ -1201,7 +1208,7 @@ int smb_inherit_dacl(struct ksmbd_conn *conn,
 	struct smb_ntsd *parent_pntsd = NULL;
 	struct smb_sid owner_sid, group_sid;
 	struct dentry *parent = path->dentry->d_parent;
-	struct mnt_idmap *idmap = mnt_idmap(path->mnt);
+	const struct mnt_idmap *idmap = mnt_idmap(path->mnt);
 	int inherited_flags = 0, flags = 0, i, nt_size = 0, pdacl_size;
 	int rc = 0, pntsd_type, ppntsd_size, acl_len, aces_size;
 	unsigned int dacloffset;
@@ -1456,7 +1463,7 @@ int smb_check_perm_dacl(struct ksmbd_conn *conn, const struct path *path,
 			__le32 *pdaccess, __le32 raw_daccess, int uid,
 			bool strict)
 {
-	struct mnt_idmap *idmap = mnt_idmap(path->mnt);
+	const struct mnt_idmap *idmap = mnt_idmap(path->mnt);
 	struct smb_ntsd *pntsd = NULL;
 	struct smb_acl *pdacl;
 	struct posix_acl *posix_acls;
@@ -1676,15 +1683,17 @@ err_out:
 	kfree(pntsd);
 	return rc;
 }
+EXPORT_SYMBOL_IF_KUNIT(smb_check_perm_dacl);
 
 int set_info_sec(struct ksmbd_conn *conn, struct ksmbd_tree_connect *tcon,
 		 const struct path *path, struct smb_ntsd *pntsd, int ntsd_len,
-		 bool type_check, bool get_write)
+		 bool type_check, bool get_write, bool posix_open,
+		 bool dacl_requested)
 {
 	int rc;
 	struct smb_fattr fattr = {{0}};
 	struct inode *inode = d_inode(path->dentry);
-	struct mnt_idmap *idmap = mnt_idmap(path->mnt);
+	const struct mnt_idmap *idmap = mnt_idmap(path->mnt);
 	struct iattr newattrs;
 
 	fattr.cf_uid = INVALID_UID;
@@ -1694,6 +1703,14 @@ int set_info_sec(struct ksmbd_conn *conn, struct ksmbd_tree_connect *tcon,
 	rc = parse_sec_desc(idmap, pntsd, ntsd_len, &fattr);
 	if (rc)
 		goto out;
+	if (fattr.cf_posix_mode && !dacl_requested) {
+		fattr.cf_posix_mode = false;
+		fattr.cf_mode = inode->i_mode;
+	}
+	if (fattr.cf_posix_mode && !posix_open) {
+		rc = -EOPNOTSUPP;
+		goto out;
+	}
 
 	newattrs.ia_valid = ATTR_CTIME;
 	if (!uid_eq(fattr.cf_uid, INVALID_UID)) {
@@ -1705,7 +1722,12 @@ int set_info_sec(struct ksmbd_conn *conn, struct ksmbd_tree_connect *tcon,
 		newattrs.ia_gid = fattr.cf_gid;
 	}
 	newattrs.ia_valid |= ATTR_MODE;
-	newattrs.ia_mode = (inode->i_mode & ~0777) | (fattr.cf_mode & 0777);
+	if (fattr.cf_posix_mode)
+		newattrs.ia_mode = (inode->i_mode & ~07777) |
+				   (fattr.cf_mode & 07777);
+	else
+		newattrs.ia_mode = (inode->i_mode & ~0777) |
+				   (fattr.cf_mode & 0777);
 
 	ksmbd_vfs_remove_acl_xattrs(idmap, path);
 	/* Update posix acls */

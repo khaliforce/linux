@@ -733,10 +733,10 @@ xfs_attr_shortform_bytesfit(
 		return 0;
 
 	/* rounded down */
-	offset = (XFS_LITINO(mp) - bytes) >> 3;
+	offset = XFS_B_TO_FORKOFFT(XFS_LITINO(mp) - bytes);
 
 	if (dp->i_df.if_format == XFS_DINODE_FMT_DEV) {
-		minforkoff = roundup(sizeof(xfs_dev_t), 8) >> 3;
+		minforkoff = XFS_B_TO_FORKOFF(sizeof(xfs_dev_t));
 		return (offset >= minforkoff) ? minforkoff : 0;
 	}
 
@@ -792,12 +792,12 @@ xfs_attr_shortform_bytesfit(
 	 * A data fork btree root must have space for at least
 	 * MINDBTPTRS key/ptr pairs if the data fork is small or empty.
 	 */
-	minforkoff = max_t(int64_t, dsize, xfs_bmdr_space_calc(MINDBTPTRS));
-	minforkoff = roundup(minforkoff, 8) >> 3;
+	minforkoff = XFS_B_TO_FORKOFF(
+			max_t(int64_t, dsize, xfs_bmdr_space_calc(MINDBTPTRS)));
 
 	/* attr fork btree root can have at least this many key/ptr pairs */
-	maxforkoff = XFS_LITINO(mp) - xfs_bmdr_space_calc(MINABTPTRS);
-	maxforkoff = maxforkoff >> 3;	/* rounded down */
+	maxforkoff = XFS_B_TO_FORKOFFT(
+			XFS_LITINO(mp) - xfs_bmdr_space_calc(MINABTPTRS));
 
 	if (offset >= maxforkoff)
 		return maxforkoff;
@@ -3042,7 +3042,14 @@ xfs_attr3_leaf_setflag(
 #endif
 	entry = &xfs_attr3_leaf_entryp(leaf)[args->index];
 
-	ASSERT((entry->flags & XFS_ATTR_INCOMPLETE) == 0);
+	if (entry->flags & XFS_ATTR_INCOMPLETE) {
+		if (!(args->op_flags & XFS_DA_OP_RECOVERY)) {
+			ASSERT(args->op_flags & XFS_DA_OP_RECOVERY);
+			return -EFSCORRUPTED;
+		}
+		return 0;
+	}
+
 	entry->flags |= XFS_ATTR_INCOMPLETE;
 	xfs_trans_log_buf(args->trans, bp,
 			XFS_DA_LOGRANGE(leaf, entry, sizeof(*entry)));

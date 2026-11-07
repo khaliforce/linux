@@ -141,17 +141,25 @@ leave:
 static int ocfs2_file_release(struct inode *inode, struct file *file)
 {
 	struct ocfs2_inode_info *oi = OCFS2_I(inode);
+	struct dentry *dentry = file->f_path.dentry;
+	struct name_snapshot name;
+	bool trace_enabled = trace_ocfs2_file_release_enabled();
+
+	if (trace_enabled)
+		take_dentry_name_snapshot(&name, dentry);
 
 	spin_lock(&oi->ip_lock);
 	if (!--oi->ip_open_count)
 		oi->ip_flags &= ~OCFS2_INODE_OPEN_DIRECT;
 
-	trace_ocfs2_file_release(inode, file, file->f_path.dentry,
-				 oi->ip_blkno,
-				 file->f_path.dentry->d_name.len,
-				 file->f_path.dentry->d_name.name,
-				 oi->ip_open_count);
+	if (trace_enabled)
+		trace_ocfs2_file_release(inode, file, dentry,
+					 oi->ip_blkno, name.name.len,
+					 name.name.name, oi->ip_open_count);
 	spin_unlock(&oi->ip_lock);
+
+	if (trace_enabled)
+		release_dentry_name_snapshot(&name);
 
 	ocfs2_free_file_private(inode, file);
 
@@ -1130,7 +1138,7 @@ out:
 	return ret;
 }
 
-int ocfs2_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
+int ocfs2_setattr(const struct mnt_idmap *idmap, struct dentry *dentry,
 		  struct iattr *attr)
 {
 	int status = 0, size_change;
@@ -1334,7 +1342,7 @@ bail:
 	return status;
 }
 
-int ocfs2_getattr(struct mnt_idmap *idmap, const struct path *path,
+int ocfs2_getattr(const struct mnt_idmap *idmap, const struct path *path,
 		  struct kstat *stat, u32 request_mask, unsigned int flags)
 {
 	struct inode *inode = d_inode(path->dentry);
@@ -1366,7 +1374,7 @@ bail:
 	return err;
 }
 
-int ocfs2_permission(struct mnt_idmap *idmap, struct inode *inode,
+int ocfs2_permission(const struct mnt_idmap *idmap, struct inode *inode,
 		     int mask)
 {
 	int ret, had_lock;

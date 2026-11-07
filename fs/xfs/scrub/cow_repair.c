@@ -280,7 +280,7 @@ xrep_cow_find_bad(
 	if (!pag)
 		return -EFSCORRUPTED;
 
-	error = xrep_ag_init(sc, pag, &sc->sa);
+	error = xrep_ag_init(sc, pag);
 	if (error)
 		goto out_pag;
 
@@ -340,7 +340,7 @@ xrep_cow_find_bad(
 				xc->irec.br_blockcount);
 
 out_sa:
-	xchk_ag_free(sc, &sc->sa);
+	xchk_ag_free(sc);
 out_pag:
 	xfs_perag_put(pag);
 	return error;
@@ -371,8 +371,8 @@ xrep_cow_find_bad_rt(
 	if (!rtg)
 		return -EFSCORRUPTED;
 
-	error = xrep_rtgroup_init(sc, rtg, &sc->sr,
-			XFS_RTGLOCK_RMAP | XFS_RTGLOCK_REFCOUNT);
+	error = xrep_rtgroup_init(sc, rtg, XFS_RTGLOCK_RMAP |
+					   XFS_RTGLOCK_REFCOUNT);
 	if (error)
 		goto out_rtg;
 
@@ -433,8 +433,8 @@ xrep_cow_find_bad_rt(
 				xc->irec.br_blockcount);
 
 out_sr:
-	xchk_rtgroup_btcur_free(&sc->sr);
-	xchk_rtgroup_free(sc, &sc->sr);
+	xchk_rtgroup_btcur_free(sc);
+	xchk_rtgroup_free(sc);
 out_rtg:
 	xfs_rtgroup_put(rtg);
 	return error;

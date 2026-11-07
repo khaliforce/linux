@@ -34,7 +34,6 @@ struct lease_ctx_info {
 
 struct lease_table {
 	char			client_guid[SMB2_CLIENT_GUID_SIZE];
-	struct ksmbd_conn	*conn;
 	struct list_head	lease_list;
 	struct list_head	l_entry;
 	spinlock_t		lb_lock;
@@ -51,6 +50,9 @@ struct lease {
 	unsigned short		epoch;
 	bool			is_dir;
 	bool			reuse_epoch;
+	bool			breaking;
+	bool			break_timeout_set;
+	unsigned long		break_timeout;
 	struct ksmbd_inode	*ci;
 	struct lease_table	*l_lb;
 	struct list_head	l_entry;
@@ -68,6 +70,9 @@ struct oplock_info {
 	int                     level;
 	int                     op_state;
 	spinlock_t		state_lock;
+	unsigned long		oplock_timeout;
+	bool			oplock_timeout_set;
+	bool			oplock_timed_out;
 	unsigned long		pending_break;
 	u64			fid;
 	atomic_t		breaking_cnt;
@@ -122,7 +127,7 @@ struct oplock_info *lookup_lease_in_table(struct ksmbd_conn *conn,
 					  char *lease_key);
 int find_same_lease_key(struct ksmbd_conn *conn, struct ksmbd_inode *ci,
 			struct lease_ctx_info *lctx);
-void destroy_lease_table(struct ksmbd_conn *conn);
+void destroy_lease_table(void);
 void smb_send_parent_lease_break_noti(struct ksmbd_file *fp,
 				      struct lease_ctx_info *lctx);
 void smb_lazy_parent_lease_break_close(struct ksmbd_file *fp);

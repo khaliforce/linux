@@ -816,14 +816,14 @@ xrep_dinode_count_rtgroup_rmaps(
 	struct xfs_scrub	*sc = ri->sc;
 	int			error;
 
-	error = xrep_rtgroup_init(sc, rtg, &sc->sr, XFS_RTGLOCK_RMAP);
+	error = xrep_rtgroup_init(sc, rtg, XFS_RTGLOCK_RMAP);
 	if (error)
 		return error;
 
 	error = xfs_rmap_query_all(sc->sr.rmap_cur, xrep_dinode_walk_rtrmap,
 			ri);
-	xchk_rtgroup_btcur_free(&sc->sr);
-	xchk_rtgroup_free(sc, &sc->sr);
+	xchk_rtgroup_btcur_free(sc);
+	xchk_rtgroup_free(sc);
 	return error;
 }
 
@@ -939,7 +939,7 @@ xrep_dinode_bad_bmbt_fork(
 
 		fkp = xfs_bmdr_key_addr(dfp, i);
 		fileoff = be64_to_cpu(fkp->br_startoff);
-		if (!xfs_verify_fileoff(sc->mp, fileoff))
+		if (!xfs_verify_fileoff(fileoff))
 			return true;
 
 		fpp = xfs_bmdr_ptr_addr(dfp, i, dmxr);
@@ -1447,7 +1447,7 @@ xrep_dinode_ensure_forkoff(
 			break;
 		case XFS_METAFILE_RTREFCOUNT:
 			rcdr = XFS_DFORK_PTR(dip, XFS_DATA_FORK);
-			dfork_min = xfs_rtrefcount_broot_space(sc->mp, rcdr);
+			dfork_min = xfs_rtrefcount_broot_space(rcdr);
 			break;
 		default:
 			dfork_min = 0;
@@ -1490,7 +1490,7 @@ xrep_dinode_ensure_forkoff(
 
 			/* Otherwise, just slide the attr fork up. */
 			before = XFS_DFORK_APTR(dip);
-			dip->di_forkoff = bmdr_minsz >> 3;
+			dip->di_forkoff = XFS_B_TO_FORKOFFT(bmdr_minsz);
 			after = XFS_DFORK_APTR(dip);
 			memmove(after, before, XFS_DFORK_ASIZE(dip, sc->mp));
 		}
@@ -1522,7 +1522,7 @@ xrep_dinode_ensure_forkoff(
 			 * fork is empty, so we don't have any old contents to
 			 * move here.
 			 */
-			dip->di_forkoff = (lit_sz - bmdr_minsz) >> 3;
+			dip->di_forkoff = XFS_B_TO_FORKOFFT(lit_sz - bmdr_minsz);
 		}
 	}
 }
@@ -2005,7 +2005,7 @@ xrep_inode_pptr(
 		return 0;
 
 	return xfs_bmap_add_attrfork(sc->tp, ip,
-			sizeof(struct xfs_attr_sf_hdr), true);
+			sizeof(struct xfs_attr_sf_hdr));
 }
 
 /* Fix COW extent size hint problems. */

@@ -68,8 +68,8 @@ xrep_attempt(
 
 	trace_xrep_attempt(XFS_I(file_inode(sc->file)), sc->sm, error);
 
-	xchk_ag_btcur_free(&sc->sa);
-	xchk_rtgroup_btcur_free(&sc->sr);
+	xchk_ag_btcur_free(sc);
+	xchk_rtgroup_btcur_free(sc);
 
 	/* Repair whatever's broken. */
 	ASSERT(sc->ops->repair);
@@ -882,16 +882,47 @@ xrep_ino_ensure_extent_count(
 	return 0;
 }
 
+/* Discard the contents of this fork and initialize as empty extent-format. */
+void
+xrep_reset_fork_to_extents(
+	struct xfs_scrub	*sc,
+	int			whichfork)
+{
+	struct xfs_ifork	*ifp = xfs_ifork_ptr(sc->ip, whichfork);
+	uint			ilog_flags = XFS_ILOG_CORE;
+
+	switch (whichfork) {
+	case XFS_DATA_FORK:
+		ilog_flags |= XFS_ILOG_DDATA;
+		break;
+	case XFS_ATTR_FORK:
+		ilog_flags |= XFS_ILOG_ADATA;
+		break;
+	default:
+		ASSERT(0);
+		return;
+	}
+
+	xfs_idestroy_fork(ifp);
+	ifp->if_format = XFS_DINODE_FMT_EXTENTS;
+	ifp->if_nextents = 0;
+	ifp->if_bytes = 0;
+	ifp->if_data = NULL;
+	ifp->if_height = 0;
+
+	xfs_trans_log_inode(sc->tp, sc->ip, ilog_flags);
+}
+
 /*
  * Initialize all the btree cursors for an AG repair except for the btree that
  * we're rebuilding.
  */
 void
 xrep_ag_btcur_init(
-	struct xfs_scrub	*sc,
-	struct xchk_ag		*sa)
+	struct xfs_scrub	*sc)
 {
 	struct xfs_mount	*mp = sc->mp;
+	struct xchk_ag		*sa = &sc->sa;
 
 	/* Set up a bnobt cursor for cross-referencing. */
 	if (sc->sm->sm_type != XFS_SCRUB_TYPE_BNOBT &&
@@ -990,9 +1021,9 @@ xrep_reinit_pagi(
 int
 xrep_ag_init(
 	struct xfs_scrub	*sc,
-	struct xfs_perag	*pag,
-	struct xchk_ag		*sa)
+	struct xfs_perag	*pag)
 {
+	struct xchk_ag		*sa = &sc->sa;
 	int			error;
 
 	ASSERT(!sa->pag);
@@ -1007,7 +1038,7 @@ xrep_ag_init(
 
 	/* Grab our own passive reference from the caller's ref. */
 	sa->pag = xfs_perag_hold(pag);
-	xrep_ag_btcur_init(sc, sa);
+	xrep_ag_btcur_init(sc);
 	return 0;
 }
 
@@ -1015,10 +1046,10 @@ xrep_ag_init(
 /* Initialize all the btree cursors for a RT repair. */
 void
 xrep_rtgroup_btcur_init(
-	struct xfs_scrub	*sc,
-	struct xchk_rt		*sr)
+	struct xfs_scrub	*sc)
 {
 	struct xfs_mount	*mp = sc->mp;
+	struct xchk_rt		*sr = &sc->sr;
 
 	ASSERT(sr->rtg != NULL);
 
@@ -1041,9 +1072,10 @@ int
 xrep_rtgroup_init(
 	struct xfs_scrub	*sc,
 	struct xfs_rtgroup	*rtg,
-	struct xchk_rt		*sr,
 	unsigned int		rtglock_flags)
 {
+	struct xchk_rt		*sr = &sc->sr;
+
 	ASSERT(sr->rtg == NULL);
 
 	xfs_rtgroup_lock(rtg, rtglock_flags);
@@ -1051,7 +1083,7 @@ xrep_rtgroup_init(
 
 	/* Grab our own passive reference from the caller's ref. */
 	sr->rtg = xfs_rtgroup_hold(rtg);
-	xrep_rtgroup_btcur_init(sc, sr);
+	xrep_rtgroup_btcur_init(sc);
 	return 0;
 }
 

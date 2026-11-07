@@ -446,7 +446,7 @@ static int zpci_msi_domain_alloc(struct irq_domain *domain, unsigned int virq,
 	return 0;
 }
 
-static void zpci_msi_clear_airq(struct irq_data *d, int i)
+static void zpci_msi_clear_airq(struct irq_data *d)
 {
 	struct msi_desc *desc = irq_data_get_msi_desc(d);
 	struct zpci_dev *zdev = to_zpci_dev(desc->dev);
@@ -459,12 +459,12 @@ static void zpci_msi_clear_airq(struct irq_data *d, int i)
 
 	if (irq_delivery == DIRECTED) {
 		for_each_possible_cpu(cpu) {
-			airq_iv_set_ptr(zpci_dibv[cpu], bit + i, 0);
-			airq_iv_set_data(zpci_dibv[cpu], bit + i, 0);
+			airq_iv_set_ptr(zpci_dibv[cpu], bit, 0);
+			airq_iv_set_data(zpci_dibv[cpu], bit, 0);
 		}
 	} else {
-		airq_iv_set_ptr(zdev->aibv, bit + i, 0);
-		airq_iv_set_data(zdev->aibv, bit + i, 0);
+		airq_iv_set_ptr(zdev->aibv, bit, 0);
+		airq_iv_set_data(zdev->aibv, bit, 0);
 	}
 }
 
@@ -476,7 +476,7 @@ static void zpci_msi_domain_free(struct irq_domain *domain, unsigned int virq,
 
 	for (i = 0; i < nr_irqs; i++) {
 		d = irq_domain_get_irq_data(domain, virq + i);
-		zpci_msi_clear_airq(d, i);
+		zpci_msi_clear_airq(d);
 		irq_domain_reset_irq_data(d);
 	}
 }
@@ -522,9 +522,6 @@ int zpci_create_parent_msi_domain(struct zpci_bus *zbus)
 		pr_err("Failed to allocate fwnode for MSI IRQ domain\n");
 		return -ENOMEM;
 	}
-
-	if (irq_delivery == FLOATING)
-		zpci_msi_parent_ops.required_flags |= MSI_FLAG_NO_AFFINITY;
 
 	zbus->msi_parent_domain = msi_create_parent_irq_domain(&info, &zpci_msi_parent_ops);
 	if (!zbus->msi_parent_domain) {
@@ -636,6 +633,9 @@ int __init zpci_irq_init(void)
 	if (s390_pci_force_floating)
 		irq_delivery = FLOATING;
 
+	if (irq_delivery == FLOATING)
+		zpci_msi_parent_ops.required_flags |= MSI_FLAG_NO_AFFINITY;
+
 	if (irq_delivery == DIRECTED)
 		zpci_airq.handler = zpci_directed_irq_handler;
 
@@ -674,6 +674,7 @@ void __init zpci_irq_exit(void)
 {
 	unsigned int cpu;
 
+	unregister_adapter_interrupt(&zpci_airq);
 	if (irq_delivery == DIRECTED) {
 		for_each_possible_cpu(cpu) {
 			airq_iv_release(zpci_dibv[cpu]);
@@ -684,5 +685,4 @@ void __init zpci_irq_exit(void)
 	}
 	if (zpci_sbv)
 		airq_iv_release(zpci_sbv);
-	unregister_adapter_interrupt(&zpci_airq);
 }

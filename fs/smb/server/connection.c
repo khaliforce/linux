@@ -114,7 +114,7 @@ static int proc_show_clients(struct seq_file *m, void *v)
 			sessions++;
 		rcu_read_unlock();
 #if IS_ENABLED(CONFIG_IPV6)
-		if (!conn->inet_addr)
+		if (conn->is_ipv6)
 			seq_printf(m, "client:\t%pI6c\n", &conn->inet6_addr);
 		else
 #endif
@@ -328,8 +328,6 @@ struct ksmbd_conn *ksmbd_conn_alloc(void)
 	ida_init(&conn->async_ida);
 	xa_init(&conn->sessions);
 
-	spin_lock_init(&conn->llist_lock);
-	INIT_LIST_HEAD(&conn->lock_list);
 
 	init_rwsem(&conn->session_lock);
 
