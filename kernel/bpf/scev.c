@@ -1502,6 +1502,10 @@ static int simplify(struct scev *scev, u32 id, void *priv)
 		return t;
 	}
 
+	/* (zext32 (zext32 X)) -> (zext32 X) */
+	if (is_zext32(scev, id, &a) && is_zext32(scev, a, &b))
+		return a;
+
 	return id;
 }
 
@@ -1827,7 +1831,11 @@ scev_reg_for_read(struct bpf_verifier_env *env, const struct bpf_func_state *st,
 	return zero ? &env->scev->zero_reg : &env->scev->unknown_reg;
 }
 
-/* Materialize a writable value in the current state, growing its stack if needed. */
+/*
+ * Materialize a writable value in the current state, growing its stack if needed.
+ * This does not go through check_stack_write(). The callers skip is_unbound_scev_reg() slots,
+ * thus the buffer of a live dynptr slice, see bpf_reg_state::buf, does not become a spill here.
+ */
 static int scev_reg_for_write(struct bpf_verifier_env *env, struct bpf_func_state *st,
 			      u32 r, struct bpf_reg_state **out)
 {
@@ -2024,7 +2032,8 @@ static void log_incompatible_scev_values(struct bpf_verifier_env *env, const cha
 }
 
 static bool scev_value_compatible(struct bpf_verifier_env *env, struct bpf_func_state *st,
-				  const struct scev_value *a, const struct scev_value *b)
+				  const struct scev_value *a, const struct scev_value *b,
+				  const struct linear_latch *latch)
 {
 	const struct bpf_reg_state *ra, *rb;
 
@@ -2035,7 +2044,7 @@ static bool scev_value_compatible(struct bpf_verifier_env *env, struct bpf_func_
 	}
 	ra = scev_reg_for_read(env, st, a->ptr_reg);
 	rb = scev_reg_for_read(env, st, b->ptr_reg);
-	if (ra && rb && bpf_same_memory_origin(ra, rb))
+	if (ra && rb && bpf_same_memory_origin(ra, rb) && !latch->zext32 && !latch->jmp32)
 		return true;
 
 incompatible:
@@ -2267,7 +2276,7 @@ static bool compute_max_iters(struct bpf_verifier_env *env,
 		}
 		return false;
 	}
-	if (!scev_value_compatible(env, st, &initial_val, &bound_val))
+	if (!scev_value_compatible(env, st, &initial_val, &bound_val, latch))
 		return false;
 
 	initial = initial_val.value;
@@ -2306,11 +2315,15 @@ static bool compute_max_iters(struct bpf_verifier_env *env,
 	if (!compute_backedge_taken_count(op, initial, step, bound, &backedge_taken_count))
 		return false;
 
+	/*
+	 * max_header_count is u32 and U32_MAX means "infinite",
+	 * check to avoid overflow below.
+	 */
+	if (backedge_taken_count >= U32_MAX - 1)
+		return false;
+
 	if (latch->zext32 || latch->jmp32) {
-		/*
-		 * compute_backedge_taken_count() guarantees that 'total_change'
-		 * does not overflow in 64-bit domain.
-		 */
+		/* total_change is guaranteed not to overflow at this point */
 		total_change = initial + step * backedge_taken_count;
 		if (latch->jmp32 && is_signed_op(op)) {
 			if ((s64)total_change < S32_MIN || (s64)total_change > S32_MAX)
@@ -2320,13 +2333,6 @@ static bool compute_max_iters(struct bpf_verifier_env *env,
 				return false;
 		}
 	}
-
-	/*
-	 * max_header_count is u32 and U32_MAX means "infinite",
-	 * check to avoid overflow below.
-	 */
-	if (backedge_taken_count >= U32_MAX - 1)
-		return false;
 
 	/* The header executes once on entry and once for each taken backedge, hence +1. */
 	iters->max_header_count = backedge_taken_count + 1;
@@ -2377,7 +2383,6 @@ static bool is_widenable_reg_type(const struct bpf_reg_state *reg)
 	case PTR_TO_PACKET:
 	case PTR_TO_PACKET_META:
 	case PTR_TO_MEM:
-	case PTR_TO_BUF:
 	case PTR_TO_BTF_ID:
 		return true;
 	default:
@@ -2389,7 +2394,7 @@ static void scratch_widened_reg_id(struct bpf_verifier_env *env, struct bpf_reg_
 {
 	switch (base_type(reg->type)) {
 	case SCALAR_VALUE:
-		reg->id = 0;
+		clear_scalar_id(reg);
 		break;
 	case PTR_TO_PACKET:
 	case PTR_TO_PACKET_META:
@@ -2454,11 +2459,13 @@ static void log_bounds(struct bpf_verifier_env *env, const struct bounds *bounds
 	bpf_verbose_snum(env, cnum64_smin(bounds->r64));
 	bpf_log(log, "..");
 	bpf_verbose_snum(env, cnum64_smax(bounds->r64));
-	if (bounds->r32.size < U32_MAX) {
+	if (bounds->r32.size < U32_MAX &&
+	    (cnum32_smin(bounds->r32) != cnum64_smin(bounds->r64) ||
+	     cnum32_smax(bounds->r32) != cnum64_smax(bounds->r64))) {
 		bpf_log(log, " (s32 ");
-		bpf_verbose_snum(env, cnum32_smin(bounds->r32));
+		bpf_verbose_snum32(env, cnum32_smin(bounds->r32));
 		bpf_log(log, "..");
-		bpf_verbose_snum(env, cnum32_smax(bounds->r32));
+		bpf_verbose_snum32(env, cnum32_smax(bounds->r32));
 		bpf_log(log, ")");
 	}
 	bpf_log(log, " step %u", bounds->step);
@@ -2700,6 +2707,9 @@ int bpf_compute_loop_iters(struct bpf_verifier_env *env, struct bpf_verifier_sta
 		reg = scev_reg_for_linear(cur_func, r);
 		/* If SCEV for r is (linear <reg> <slope>) */
 		if (reg && is_simple_linear(scev, r_scev, &coefs) && is_widenable_reg_type(reg)) {
+			/* 32-bit ALU operations on pointers convert them to scalars */
+			if (coefs.zext32 && reg->type != SCALAR_VALUE)
+				goto cant_widen;
 			/* Spills at varying offsets lose precision */
 			if (test_bit(r, loop->store_base_regs)) {
 				spill_base = true;
@@ -2756,6 +2766,7 @@ static int union_any_reg(struct bpf_verifier_env *env, struct bpf_func_state *lo
 	const struct bpf_reg_state *leaf_reg;
 	struct scev *scev = env->scev;
 	u32 l, r, leaf, order;
+	s64 smax = reg_smax(acc);
 	s64 imm;
 	int err;
 
@@ -2779,10 +2790,13 @@ static int union_any_reg(struct bpf_verifier_env *env, struct bpf_func_state *lo
 			verifier_bug(env, "scev ANY union has an unsupported leaf");
 			return -EFAULT;
 		}
+		smax = max(smax, reg_smax(leaf_reg));
 		err = bpf_reg_union(env, acc, leaf_reg);
 		if (err)
 			return err;
 	}
+	/* All leaves have the same range. It goes with the largest offset of all leaves. */
+	bpf_trim_pkt_range(acc, smax);
 	return 0;
 }
 
@@ -2831,6 +2845,9 @@ int bpf_widen_scev_regs(struct bpf_verifier_env *env, struct bpf_verifier_state 
 				bpf_log(log, "\n");
 			}
 			scratch_widened_reg_id(env, reg);
+			/* "at pkt_end" and "beyond pkt_end" are not valid in all iterations */
+			if (type_is_pkt_pointer(reg->type))
+				reg->range = max(reg->range, 0);
 			err = bpf_set_reg_range(env, reg, bounds.r64, bounds.r32,
 						bounds.base, bounds.step);
 			if (err)
@@ -2891,13 +2908,15 @@ int bpf_clamp_scev_regs(struct bpf_verifier_env *env, struct bpf_func_state *cur
 		    is_unbound_scev_reg(env, entry_st, r))
 			continue;
 
+		/*
+		 * A call in the loop can change the type: it invalidates packet pointers or
+		 * releases a reference. The bounds are the offsets of the pointer at the entry.
+		 * They say nothing about the value that is in the register now.
+		 */
+		if (reg->type != entry_reg->type)
+			continue;
+
 		linear_bounds(entry_reg, max_header_count, &coefs, &bounds);
-		bounds.r64 = cnum64_intersect(reg->r64, bounds.r64);
-		bounds.r32 = cnum32_intersect(reg->r32, bounds.r32);
-		if (cnum64_is_empty(bounds.r64)) {
-			verifier_bug(env, "scev clamp produced empty range for r%d", r);
-			return -EFAULT;
-		}
 		if (log->level & BPF_LOG_LEVEL2) {
 			bpf_log(log, "loop header at %d, clamping ", insn_idx);
 			log_reg(env, r);
@@ -2906,6 +2925,13 @@ int bpf_clamp_scev_regs(struct bpf_verifier_env *env, struct bpf_func_state *cur
 			bpf_log(log, "\n");
 		}
 		scratch_widened_reg_id(env, reg);
+		/*
+		 * The range of a packet pointer goes together with its id and with the offsets
+		 * that it had in the compare with pkt_end. Both are replaced here. What holds for
+		 * the new offsets is the range at the entry.
+		 */
+		if (type_is_pkt_pointer(reg->type))
+			reg->range = max(entry_reg->range, 0);
 		err = bpf_set_reg_range(env, reg, bounds.r64, bounds.r32,
 					bounds.base, bounds.step);
 		if (err)
