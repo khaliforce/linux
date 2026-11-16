@@ -1011,7 +1011,7 @@ static int sun50i_iommu_probe(struct platform_device *pdev)
 	if (!variant)
 		return -EINVAL;
 
-	iommu = devm_kzalloc(&pdev->dev, sizeof(*iommu), GFP_KERNEL);
+	iommu = devm_kzalloc_obj(&pdev->dev, *iommu);
 	if (!iommu)
 		return -ENOMEM;
 	spin_lock_init(&iommu->iommu_lock);
